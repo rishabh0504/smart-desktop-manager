@@ -1,0 +1,108 @@
+#!/bin/bash
+set -euo pipefail
+
+# =========================================================================
+# SMART DESKTOP MANAGER - NATIVE INSTALLER LOGGING (Preinstall)
+# =========================================================================
+
+# 1. Setup Logging
+LOG_FILE="/tmp/sdm_installer_$(date +%s).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+set -x
+
+echo "========================================================================"
+echo "SMART DESKTOP MANAGER INSTALLATION STARTED"
+echo "Log File: $LOG_FILE"
+echo "========================================================================"
+
+# 2. Environment Audit
+echo "STEP 1: Environment Audit"
+echo "User: $(whoami)"
+echo "Date: $(date)"
+echo "OS Version: $(sw_vers -productVersion)"
+CPU_CORES=$(sysctl -n hw.ncpu)
+MEM_GB=$(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 ))
+echo "CPU Cores: $CPU_CORES"
+echo "RAM: $MEM_GB GB"
+
+# 3. Ollama Installation
+echo "STEP 2: Ollama Check"
+
+export PATH="$PATH:/usr/local/bin:/opt/homebrew/bin:/Applications/ollama.app/Contents/MacOS"
+OLLAMA_BIN="$(command -v ollama || true)"
+
+if [[ -x "$OLLAMA_BIN" ]]; then
+    echo "✅ Ollama found at: $OLLAMA_BIN"
+else
+    echo "⬇️ Ollama NOT found. Installing..."
+    TMP_SCRIPT=$(mktemp /tmp/ollama_install.XXXX.sh)
+    curl -fsSL https://ollama.com/install.sh -o "$TMP_SCRIPT"
+    chmod +x "$TMP_SCRIPT"
+    bash "$TMP_SCRIPT"
+    rm -f "$TMP_SCRIPT"
+    OLLAMA_BIN="$(command -v ollama || true)"
+    if [[ -x "$OLLAMA_BIN" ]]; then
+        echo "✅ Ollama installed successfully"
+    else
+        echo "⚠️ Ollama install failed, continuing..."
+    fi
+fi
+
+# 4. Model Bootstrapping
+echo "STEP 3: AI Model Bootstrapping"
+
+REQUIRED_MODELS=("gemma3:1b" "llama3.2:3b")
+
+for MODEL in "${REQUIRED_MODELS[@]}"; do
+    echo "--------------------------------------"
+    if "$OLLAMA_BIN" list 2>/dev/null | grep -q "$MODEL"; then
+        echo "✅ Required model '$MODEL' already installed."
+    else
+        echo "⬇️ Pulling required model '$MODEL'..."
+        if "$OLLAMA_BIN" pull "$MODEL"; then
+            echo "✅ '$MODEL' installed."
+        else
+            echo "⚠️ Failed to pull '$MODEL'. Continuing."
+        fi
+    fi
+done
+
+# 5. Whisper Transcription via whisper.cpp
+echo "STEP 4: Optional Transcription Setup (whisper.cpp)"
+
+WHISPER_CPP_BIN="/usr/local/bin/whisper.cpp"
+
+if command -v whisper.cpp >/dev/null 2>&1 || [[ -f "$WHISPER_CPP_BIN" ]]; then
+    echo "✅ whisper.cpp already available"
+else
+    echo "⬇️ Installing whisper.cpp transcription tool"
+
+    TMP_DIR=$(mktemp -d /tmp/whispercpp.XXXX)
+    git clone https://github.com/ggerganov/whisper.cpp "$TMP_DIR"
+    cd "$TMP_DIR"
+    make
+
+    if [[ -f ./main ]]; then
+        mv ./main /usr/local/bin/whisper.cpp
+        echo "✅ whisper.cpp installed"
+    else
+        echo "⚠️ whisper.cpp build failed — continuing without it"
+    fi
+
+    cd -
+    rm -rf "$TMP_DIR"
+fi
+
+# 6. Finalization
+echo "STEP 5: Finalizing Installation"
+
+READY_DIR="/Library/Application Support/SmartDesktopManager"
+mkdir -p "$READY_DIR"
+echo "1" > "$READY_DIR/ready"
+chmod 755 "$READY_DIR"
+
+echo "========================================================================"
+echo "✅ SUCCESS! Installation Complete"
+echo "========================================================================"
+
+exit 0

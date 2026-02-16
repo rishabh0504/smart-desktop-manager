@@ -1,0 +1,73 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: install pnpm
+        run: npm install -g pnpm
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: install app dependencies
+        run: pnpm install
+
+      # ── Sidecar: build the AI bootstrapper binary ──
+      - name: build sidecar
+        run: |
+          cd src-tauri
+          cargo build --bin sdm-installer --release
+          mkdir -p binaries
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            cp target/release/sdm-installer binaries/sdm-installer-aarch64-apple-darwin
+            cp target/release/sdm-installer binaries/sdm-installer-x86_64-apple-darwin
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            cp target/release/sdm-installer.exe binaries/sdm-installer-x86_64-pc-windows-msvc.exe
+          fi
+        shell: bash
+
+      # ── macOS: build .app then wrap into GUI .pkg wizard ──
+      - name: build macOS PKG wizard installer
+        if: matrix.platform == 'macos-latest'
+        run: pnpm build:pkg
+
+      - name: upload macOS PKG
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartDesktopManager-macos-pkg
+          path: SmartDesktopManager.pkg
+
+      # ── Windows: build NSIS wizard installer ──
+      - name: build Windows NSIS wizard installer
+        if: matrix.platform == 'windows-latest'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "Smart Desktop Manager v__VERSION__"
+          releaseBody: "See the assets below for the installers."
+          releaseDraft: true
+          prerelease: false

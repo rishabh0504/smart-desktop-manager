@@ -1,0 +1,129 @@
+import { create } from "zustand";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { toast } from "sonner";
+
+export interface DuplicateGroup {
+    hash: String;
+    size: number;
+    paths: string[];
+}
+
+export interface ProgressEvent {
+    scanned: number;
+    duplicates_found: number;
+    current_path: string;
+    status: string;
+    elapsed_ms: number;
+}
+
+interface DedupeStore {
+    scanning: boolean;
+    progress: ProgressEvent | null;
+    duplicates: DuplicateGroup[];
+    selectedPaths: Set<string>;
+    scanQueue: string[];
+
+    // Actions
+    addToQueue: (path: string) => void;
+    removeFromQueue: (path: string) => void;
+    startScan: () => Promise<void>;
+    resetScan: () => void;
+    toggleSelection: (path: string) => void;
+    selectDuplicates: (strategy: "all-but-newest" | "all-but-oldest" | "none") => void;
+    deleteSelected: () => Promise<void>;
+}
+
+export const useDedupeStore = create<DedupeStore>((set, get) => ({
+    scanning: false,
+    progress: null,
+    duplicates: [],
+    selectedPaths: new Set(),
+    scanQueue: [],
+
+    addToQueue: (path) => set(state => ({
+        scanQueue: state.scanQueue.includes(path) ? state.scanQueue : [...state.scanQueue, path]
+    })),
+
+    removeFromQueue: (path) => set(state => ({
+        scanQueue: state.scanQueue.filter(p => p !== path)
+    })),
+
+    startScan: async () => {
+        const { scanQueue } = get();
+        if (scanQueue.length === 0) {
+            toast.error("Add at least one folder to scan");
+            return;
+        }
+
+        set({ scanning: true, duplicates: [], progress: null, selectedPaths: new Set() });
+
+        const unlistenFound = await listen<DuplicateGroup>("duplicate-found", (event) => {
+            set(state => ({
+                duplicates: [...state.duplicates, event.payload]
+            }));
+        });
+
+        const unlistenProgress = await listen<ProgressEvent>("dedupe-progress", (event) => {
+            set({ progress: event.payload });
+        });
+
+        try {
+            await invoke("find_duplicates", { paths: scanQueue });
+            set({ scanning: false });
+        } catch (error) {
+            console.error("Dedupe failed:", error);
+            toast.error(`Dedupe failed: ${error}`);
+            set({ scanning: false });
+        } finally {
+            unlistenFound();
+            unlistenProgress();
+        }
+    },
+
+    resetScan: () => set({ scanning: false, duplicates: [], progress: null, selectedPaths: new Set() }),
+
+    toggleSelection: (path) => {
+        set(state => {
+            const newSelection = new Set(state.selectedPaths);
+            if (newSelection.has(path)) newSelection.delete(path);
+            else newSelection.add(path);
+            return { selectedPaths: newSelection };
+        });
+    },
+
+    selectDuplicates: (strategy) => {
+        const { duplicates } = get();
+        const newSelection = new Set<string>();
+
+        if (strategy === "none") {
+            set({ selectedPaths: newSelection });
+            return;
+        }
+
+        // Simple strategy: select all but the first one in each group
+        duplicates.forEach(group => {
+            group.paths.slice(1).forEach(path => newSelection.add(path));
+        });
+
+        set({ selectedPaths: newSelection });
+    },
+
+    deleteSelected: async () => {
+        const { selectedPaths } = get();
+        if (selectedPaths.size === 0) return;
+
+        const confirm = await window.confirm(`Are you sure you want to delete ${selectedPaths.size} files?`);
+        if (!confirm) return;
+
+        try {
+            const operationId = crypto.randomUUID();
+            await invoke("delete_items", { operationId, paths: Array.from(selectedPaths) });
+            toast.success(`${selectedPaths.size} files deleted`);
+            // Refresh would be complex, maybe just mark as deleted or reset
+            set({ duplicates: [], selectedPaths: new Set() });
+        } catch (error) {
+            toast.error(`Delete failed: ${error}`);
+        }
+    }
+}));

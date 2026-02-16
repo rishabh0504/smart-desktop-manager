@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="1">
+    <title>Smart Desktop Manager</title>
+    <organization>com.smartdesktop.manager</organization>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+    
+    <!-- Installer Steps -->
+    <choices-outline>
+        <line choice="default"/>
+    </choices-outline>
+    
+    <choice id="default" visible="true" title="Smart Desktop Manager">
+        <pkg-ref id="com.smartdesktop.manager"/>
+    </choice>
+    
+    <pkg-ref id="com.smartdesktop.manager" version="0.1.0" onConclusion="none">SmartDesktopManager_app.pkg</pkg-ref>
+
+    <!-- UI Elements -->
+    <welcome file="welcome.html" />
+    <license file="license.html" />
+    <conclusion file="conclusion.html" />
+</installer-gui-script>
