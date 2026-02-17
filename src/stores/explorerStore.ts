@@ -15,6 +15,7 @@ interface ExplorerStore {
 
     // Per-Tab Actions (require tabId)
     setPath: (tabId: string, path: string, updateHistory?: boolean, force?: boolean) => Promise<void>;
+    loadMore: (tabId: string) => Promise<void>;
     toggleSelection: (tabId: string, path: string) => void;
     handleSelection: (tabId: string, path: string, isCmd: boolean, isShift: boolean) => void;
     clearSelection: (tabId: string) => void;
@@ -37,6 +38,7 @@ const initialPanelState: Omit<Tab, "id" | "title" | "type"> = {
     path: "/",
     entries: [],
     total: 0,
+    has_more: false,
     loading: false,
     sortBy: "name",
     order: "asc",
@@ -184,6 +186,7 @@ export const useExplorerStore = create<ExplorerStore>((set, get) => ({
                     ...t,
                     entries: response.entries,
                     total: response.total,
+                    has_more: response.has_more,
                     loading: false,
                     history: nextHistory,
                     currentIndex: nextIndex,
@@ -193,6 +196,42 @@ export const useExplorerStore = create<ExplorerStore>((set, get) => ({
             }));
         } catch (error) {
             console.error(`Failed to load directory ${path}:`, error);
+            set(state => ({
+                tabs: state.tabs.map(t => t.id === tabId ? { ...t, loading: false } : t)
+            }));
+        }
+    },
+
+    loadMore: async (tabId) => {
+        const tab = get().tabs.find(t => t.id === tabId);
+        if (!tab || !tab.has_more || tab.loading) return;
+
+        set(state => ({
+            tabs: state.tabs.map(t => t.id === tabId ? { ...t, loading: true } : t)
+        }));
+
+        try {
+            const settings = (await import("./settingsStore")).useSettingsStore.getState().settings;
+            const response: DirectoryResponse = await invoke("read_dir_chunked", {
+                path: tab.path,
+                offset: tab.entries.length,
+                limit: 1000,
+                sortBy: tab.sortBy,
+                order: tab.order,
+                settings,
+            });
+
+            set(state => ({
+                tabs: state.tabs.map(t => t.id === tabId ? {
+                    ...t,
+                    entries: [...t.entries, ...response.entries],
+                    total: response.total,
+                    has_more: response.has_more,
+                    loading: false,
+                } : t)
+            }));
+        } catch (error) {
+            console.error("Load more failed:", error);
             set(state => ({
                 tabs: state.tabs.map(t => t.id === tabId ? { ...t, loading: false } : t)
             }));

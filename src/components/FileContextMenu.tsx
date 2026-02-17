@@ -1,13 +1,13 @@
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger } from "@/components/ui/context-menu";
 import { FileEntry } from "@/types/explorer";
 import { useExplorerStore } from "@/stores/explorerStore";
-import { useListStore } from "@/stores/listStore";
 import { usePreviewStore } from "@/stores/previewStore";
 import { useDedupeStore } from "@/stores/dedupeStore";
+import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
+import { useMoveQueueStore } from "@/stores/moveQueueStore";
 import { toast } from "sonner";
-import { CopyCheck, FolderPlus, Pencil } from "lucide-react";
+import { CopyCheck, FolderPlus, Pencil, Trash2, FolderInput } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-
 interface FileContextMenuProps {
     children: React.ReactNode;
     entry: FileEntry;
@@ -19,9 +19,10 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
     const refresh = useExplorerStore((state) => state.refresh);
     const copyToClipboard = useExplorerStore((state) => state.copyToClipboard);
     const cutToClipboard = useExplorerStore((state) => state.cutToClipboard);
-    const addItem = useListStore((state) => state.addItem);
     const openPreview = usePreviewStore((state) => state.openPreview);
     const addToDedupe = useDedupeStore((state) => state.addToQueue);
+    const addToDeleteQueue = useDeleteQueueStore((state) => state.addToQueue);
+    const { queues, addQueue: addMoveQueue, addToQueue: addToMoveQueue, updateQueue } = useMoveQueueStore();
     const setActiveView = useExplorerStore((state) => state.setActiveView);
 
     const handleOpen = () => {
@@ -38,9 +39,25 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
         setActiveView("dedupe");
     };
 
-    const handleAddToList = () => {
-        addItem(entry);
-        // toast.success("Added to list");
+    const handleAddToDeleteQueue = () => {
+        addToDeleteQueue(entry);
+        toast.success("Added to delete queue");
+    };
+
+    const handleAddEntryToMoveQueue = (queueId: string) => {
+        addToMoveQueue(queueId, entry);
+        toast.success("Added to move queue");
+    };
+
+    const handleUseFolderAsDestination = (queueId?: string) => {
+        if (queueId) {
+            updateQueue(queueId, { folderPath: entry.path });
+            toast.success("Destination updated");
+        } else {
+            const name = `queue-${queues.length + 1}`;
+            addMoveQueue(name, entry.path);
+            toast.success(`Created ${name} with this folder as destination`);
+        }
     };
 
     const handleShowInFinder = () => {
@@ -118,46 +135,54 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
     return (
         <ContextMenu>
             <ContextMenuTrigger>{children}</ContextMenuTrigger>
-            <ContextMenuContent className="w-64">
-                <ContextMenuItem onClick={handleOpen}>
-                    Open
-                </ContextMenuItem>
+            <ContextMenuContent className="w-48 text-xs [&_button]:text-xs">
+                <ContextMenuItem onClick={handleOpen} className="text-xs">Open</ContextMenuItem>
                 {entry.is_dir && (
-                    <ContextMenuItem onClick={handleAddToDedupe}>
-                        <CopyCheck className="w-4 h-4 mr-2" />
-                        Find Duplicates
+                    <ContextMenuItem onClick={handleAddToDedupe} className="text-xs">
+                        <CopyCheck className="w-3.5 h-3.5 mr-2" /> Find duplicates
                     </ContextMenuItem>
                 )}
+                {entry.is_dir && (
+                    <ContextMenuSub>
+                        <ContextMenuSubTrigger className="text-xs">
+                            <FolderInput className="w-3.5 h-3.5 mr-2" /> Use as move destination
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="text-xs [&_button]:text-xs">
+                            <ContextMenuItem onClick={() => handleUseFolderAsDestination()} className="text-xs">New queue</ContextMenuItem>
+                            {queues.map((q) => (
+                                <ContextMenuItem key={q.id} onClick={() => handleUseFolderAsDestination(q.id)} className="text-xs">Set for {q.name}</ContextMenuItem>
+                            ))}
+                        </ContextMenuSubContent>
+                    </ContextMenuSub>
+                )}
+                <ContextMenuSub>
+                    <ContextMenuSubTrigger className="text-xs">
+                        <FolderInput className="w-3.5 h-3.5 mr-2" /> Add to move queue
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="text-xs [&_button]:text-xs">
+                        {queues.length === 0 ? (
+                            <ContextMenuItem disabled className="text-xs">No queues</ContextMenuItem>
+                        ) : (
+                            queues.map((q) => (
+                                <ContextMenuItem key={q.id} onClick={() => handleAddEntryToMoveQueue(q.id)} className="text-xs">{q.name} ({q.items.length})</ContextMenuItem>
+                            ))
+                        )}
+                    </ContextMenuSubContent>
+                </ContextMenuSub>
                 <ContextMenuSeparator />
-                <ContextMenuItem onClick={handleAddToList}>
-                    Add to List Tray
-                </ContextMenuItem>
+                <ContextMenuItem onClick={handleCopy} className="text-xs">Copy</ContextMenuItem>
+                <ContextMenuItem onClick={handleCut} className="text-xs">Cut</ContextMenuItem>
+                <ContextMenuItem onClick={handleShowInFinder} className="text-xs">Show in Finder</ContextMenuItem>
                 <ContextMenuSeparator />
-                <ContextMenuItem onClick={handleCopy}>
-                    Copy
-                </ContextMenuItem>
-                <ContextMenuItem onClick={handleCut}>
-                    Cut
-                </ContextMenuItem>
+                <ContextMenuItem onClick={handleRename} className="text-xs"><Pencil className="w-3.5 h-3.5 mr-2" /> Rename</ContextMenuItem>
+                <ContextMenuItem onClick={handleNewFolder} className="text-xs"><FolderPlus className="w-3.5 h-3.5 mr-2" /> New folder</ContextMenuItem>
                 <ContextMenuSeparator />
-                <ContextMenuItem onClick={handleShowInFinder}>
-                    Show in Finder
+                <ContextMenuItem onClick={handleAddToDeleteQueue} className="text-xs text-destructive hover:text-destructive">
+                    <Trash2 className="w-3.5 h-3.5 mr-2" /> Add to delete queue
                 </ContextMenuItem>
+                <ContextMenuItem onClick={handleDelete} className="text-xs text-red-500 hover:text-red-600">Delete</ContextMenuItem>
                 <ContextMenuSeparator />
-                <ContextMenuItem onClick={handleRename}>
-                    <Pencil className="w-4 h-4 mr-2" /> Rename
-                </ContextMenuItem>
-                <ContextMenuItem onClick={handleNewFolder}>
-                    <FolderPlus className="w-4 h-4 mr-2" /> New Folder
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={handleDelete} className="text-red-500 hover:text-red-600">
-                    Delete
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={handleProperties}>
-                    Properties
-                </ContextMenuItem>
+                <ContextMenuItem onClick={handleProperties} className="text-xs">Properties</ContextMenuItem>
             </ContextMenuContent>
         </ContextMenu>
     );

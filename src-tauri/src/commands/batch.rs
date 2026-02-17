@@ -1,8 +1,31 @@
 use serde::Serialize;
-use std::path::PathBuf;
-use tauri::{AppHandle, Emitter};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
+use tauri::{AppHandle, Emitter};
+
 use crate::commands::operation::{register_operation, unregister_operation};
+
+/// Returns a path under dest_dir that does not exist. If file_name exists, tries "stem (1).ext", "stem (2).ext", etc.
+fn unique_dest_path(dest_dir: &Path, file_name: &std::ffi::OsStr) -> PathBuf {
+    let path = dest_dir.join(file_name);
+    if !path.exists() {
+        return path;
+    }
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("item");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    for n in 1..10000 {
+        let name = if ext.is_empty() {
+            format!("{} ({})", stem, n)
+        } else {
+            format!("{} ({}).{}", stem, n, ext)
+        };
+        let candidate = dest_dir.join(&name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    path
+}
 
 #[derive(Serialize, Clone)]
 pub struct BatchProgress {
@@ -71,7 +94,7 @@ pub async fn batch_copy(
 
         let src_path = PathBuf::from(src);
         let file_name = src_path.file_name().unwrap_or_default();
-        let target_path = dest_path.join(file_name);
+        let target_path = unique_dest_path(&dest_path, file_name);
 
         let _ = app.emit("batch_progress", BatchProgress {
             operation_id: operation_id.clone(),
@@ -81,15 +104,21 @@ pub async fn batch_copy(
             progress: (index as f64 / total_items as f64) * 100.0,
         });
 
-        if src_path.is_dir() {
-            let mut options = fs_extra::dir::CopyOptions::new();
-            options.overwrite = true;
-            fs_extra::dir::copy(&src_path, &destination_dir, &options).map_err(|e| e.to_string())?;
-        } else {
-            let mut options = fs_extra::file::CopyOptions::new();
-            options.overwrite = true;
-            fs_extra::file::copy(&src_path, &target_path, &options).map_err(|e| e.to_string())?;
-        }
+        let is_dir = src_path.is_dir();
+        let res = tokio::task::spawn_blocking(move || {
+            if is_dir {
+                let mut opts = fs_extra::dir::CopyOptions::new();
+                opts.overwrite = false;
+                fs_extra::dir::copy(&src_path, &target_path, &opts).map_err(|e| e.to_string()).map(|_| ())
+            } else {
+                let mut opts = fs_extra::file::CopyOptions::new();
+                opts.overwrite = false;
+                fs_extra::file::copy(&src_path, &target_path, &opts).map_err(|e| e.to_string()).map(|_| ())
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        res.map_err(|e| e.to_string())?;
     }
 
     unregister_operation(&operation_id);
@@ -116,7 +145,7 @@ pub async fn batch_move(
 
         let src_path = PathBuf::from(src);
         let file_name = src_path.file_name().unwrap_or_default();
-        let target_path = dest_path.join(file_name);
+        let target_path = unique_dest_path(&dest_path, file_name);
 
         let _ = app.emit("batch_progress", BatchProgress {
             operation_id: operation_id.clone(),
@@ -126,15 +155,23 @@ pub async fn batch_move(
             progress: (index as f64 / total_items as f64) * 100.0,
         });
 
-        if src_path.is_dir() {
-            let mut options = fs_extra::dir::CopyOptions::new();
-            options.overwrite = true;
-            fs_extra::dir::move_dir(&src_path, &destination_dir, &options).map_err(|e| e.to_string())?;
-        } else {
-            let mut options = fs_extra::file::CopyOptions::new();
-            options.overwrite = true;
-            fs_extra::file::move_file(&src_path, &target_path, &options).map_err(|e| e.to_string())?;
-        }
+        let is_dir = src_path.is_dir();
+        let res = tokio::task::spawn_blocking(move || {
+            if is_dir {
+                let mut opts = fs_extra::dir::CopyOptions::new();
+                opts.overwrite = false;
+                fs_extra::dir::copy(&src_path, &target_path, &opts)
+                    .map_err(|e| e.to_string())
+                    .and_then(|_| std::fs::remove_dir_all(&src_path).map_err(|e| e.to_string()))
+            } else {
+                let mut opts = fs_extra::file::CopyOptions::new();
+                opts.overwrite = false;
+                fs_extra::file::move_file(&src_path, &target_path, &opts).map_err(|e| e.to_string()).map(|_| ())
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        res.map_err(|e| e.to_string())?;
     }
 
     unregister_operation(&operation_id);

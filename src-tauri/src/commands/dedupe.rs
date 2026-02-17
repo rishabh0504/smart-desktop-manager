@@ -2,17 +2,20 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use serde::{Serialize, Deserialize};
-use sha2::{Sha256, Digest};
-use tauri::{Emitter, Runtime};
-use walkdir::WalkDir;
-use rayon::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use tauri::{Emitter, Runtime};
+
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
+
+/// Max files to consider in discovery phase to avoid OOM on 10TB+ volumes.
+const MAX_DEDUPE_DISCOVERY_FILES: usize = 10_000_000;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DuplicateGroup {
@@ -105,28 +108,40 @@ pub async fn find_duplicates<R: Runtime>(
         }
     });
 
-    // Phase 1: Discovery
+    // Phase 1: Discovery (ignore crate = respect .gitignore / .ignore, skip noisy dirs on 10TB)
     let mut files_by_identity: HashMap<(u64, u64, u64), Vec<PathBuf>> = HashMap::new();
-    for start_path in cleaned_paths {
-        for entry in WalkDir::new(&start_path).into_iter().filter_map(|e| e.ok()) {
-            if entry.file_type().is_file() {
-                if let Ok(metadata) = entry.metadata() {
-                    let size = metadata.len();
-                    if size > 0 {
-                        #[cfg(unix)]
-                        let key = (size, metadata.dev(), metadata.ino());
-                        #[cfg(not(unix))]
-                        let key = (size, 0, 0);
+    for start_path in &cleaned_paths {
+        let mut walker = ignore::WalkBuilder::new(start_path);
+        walker.follow_links(false);
+        for result in walker.build() {
+            if scanned_count.load(Ordering::Relaxed) >= MAX_DEDUPE_DISCOVERY_FILES {
+                break;
+            }
+            let entry = match result {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let path = entry.path().to_path_buf();
+            let metadata = match path.metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let size = metadata.len();
+            if size == 0 {
+                continue;
+            }
+            #[cfg(unix)]
+            let key = (size, metadata.dev(), metadata.ino());
+            #[cfg(not(unix))]
+            let key = (size, 0u64, 0u64);
 
-                        files_by_identity.entry(key).or_default().push(entry.path().to_path_buf());
-                        scanned_count.fetch_add(1, Ordering::Relaxed);
-                        
-                        // Path update is still via Mutex, but discovery is single-threaded here anyway.
-                        if let Ok(mut p) = last_path_shared.lock() {
-                            *p = entry.path().to_string_lossy().to_string();
-                        }
-                    }
-                }
+            files_by_identity.entry(key).or_default().push(path.clone());
+            scanned_count.fetch_add(1, Ordering::Relaxed);
+            if let Ok(mut p) = last_path_shared.lock() {
+                *p = path.to_string_lossy().to_string();
             }
         }
     }

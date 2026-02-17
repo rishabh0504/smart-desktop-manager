@@ -9,6 +9,13 @@ import { FileRow } from "./FileRow";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { FileContextMenu } from "@/components/FileContextMenu";
+import {
+    ContextMenu,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuSeparator,
+    ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import {
     LayoutList,
@@ -20,8 +27,13 @@ import {
     ChevronUp,
     ChevronDown,
     Trash2,
+    FolderPlus,
+    ClipboardPaste,
+    RefreshCw,
+    FolderOpen,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 
 interface FilePanelProps {
     tabId: string;
@@ -42,10 +54,14 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
     const refresh = useExplorerStore((state) => state.refresh);
     const toggleSelection = useExplorerStore((state) => state.toggleSelection);
     const setPath = useExplorerStore((state) => state.setPath);
+    const loadMore = useExplorerStore((state) => state.loadMore);
+    const clipboard = useExplorerStore((state) => state.clipboard);
+    const pasteFromClipboard = useExplorerStore((state) => state.pasteFromClipboard);
     const { openPreview } = usePreviewStore();
     const { settings } = useSettingsStore();
 
     const parentRef = useRef<HTMLDivElement>(null);
+    const loadMoreTriggered = useRef(false);
     const [selectionRect, setSelectionRect] = useState<{ x: number; y: number; width: number; height: number; startX: number; startY: number } | null>(null);
 
     // Don't render until tab exists and has a path
@@ -63,6 +79,16 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
     });
 
     useEffect(() => rowVirtualizer.measure(), [tab.entries, tab.viewMode]);
+
+    const onScroll = useCallback(() => {
+        const el = parentRef.current;
+        if (!el || !tab.has_more || tab.loading || loadMoreTriggered.current) return;
+        const { scrollTop, scrollHeight, clientHeight } = el;
+        if (scrollHeight - scrollTop - clientHeight < 400) {
+            loadMoreTriggered.current = true;
+            loadMore(tab.id).finally(() => { loadMoreTriggered.current = false; });
+        }
+    }, [tab.id, tab.has_more, tab.loading, loadMore]);
 
     const onItemClick = useCallback(
         (entry: FileEntry, e: React.MouseEvent) => {
@@ -306,6 +332,55 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
         setSelectionRect(null);
     };
 
+    const handleNewFolderInPanel = useCallback(async () => {
+        const currentTab = useExplorerStore.getState().tabs.find((t) => t.id === tabId);
+        const currentPath = currentTab?.path;
+        if (!currentPath) {
+            toast.error("No current folder");
+            return;
+        }
+        const base = currentPath.replace(/[/\\]+$/, "");
+        let name = "Untitled folder";
+        let path = `${base}/${name}`;
+        try {
+            await invoke("create_folder", { path });
+            toast.success("Folder created");
+            refresh(tabId);
+        } catch (error) {
+            const errStr = String(error);
+            if (errStr.includes("already exists")) {
+                let n = 2;
+                while (n < 100) {
+                    name = `Untitled folder (${n})`;
+                    path = `${base}/${name}`;
+                    try {
+                        await invoke("create_folder", { path });
+                        toast.success("Folder created");
+                        refresh(tabId);
+                        return;
+                    } catch {
+                        n++;
+                    }
+                }
+            }
+            toast.error(`Create folder failed: ${error}`);
+        }
+    }, [tabId, refresh]);
+
+    const handlePasteInPanel = useCallback(async () => {
+        try {
+            await pasteFromClipboard(tab.path);
+            toast.success("Pasted");
+            refresh(tab.id);
+        } catch (error) {
+            toast.error(`Paste failed: ${error}`);
+        }
+    }, [tab.path, tab.id, pasteFromClipboard, refresh]);
+
+    const handleShowFolderInFinder = useCallback(() => {
+        invoke("show_in_finder", { path: tab.path });
+    }, [tab.path]);
+
     return (
         <div
             className={cn(
@@ -369,16 +444,19 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
             )}
 
             {/* File content */}
-            <div
-                ref={parentRef}
-                className="flex-1 overflow-auto outline-none relative"
-                tabIndex={0}
-                onMouseDown={onMouseDown}
-                onMouseMove={onMouseMove}
-                onMouseUp={onMouseUp}
-                onMouseLeave={onMouseUp}
-            >
-                {tab.loading && (
+            <ContextMenu>
+                <ContextMenuTrigger asChild>
+                    <div
+                        ref={parentRef}
+                        className="flex-1 overflow-auto outline-none relative"
+                        tabIndex={0}
+                        onScroll={onScroll}
+                        onMouseDown={onMouseDown}
+                        onMouseMove={onMouseMove}
+                        onMouseUp={onMouseUp}
+                        onMouseLeave={onMouseUp}
+                    >
+                        {tab.loading && (
                     <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-50">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                     </div>
@@ -449,7 +527,41 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
                         })}
                     </div>
                 )}
-            </div>
+                {tab.has_more && !tab.loading && tab.entries.length > 0 && (
+                    <div className="py-2 px-4 border-t bg-muted/20 flex justify-center">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs"
+                            disabled={tab.loading}
+                            onClick={() => loadMore(tab.id)}
+                        >
+                            {tab.loading ? "Loading..." : `Load more (${tab.entries.length} of ${tab.total} shown)`}
+                        </Button>
+                    </div>
+                )}
+                    </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-44 text-xs [&_button]:text-xs">
+                    <ContextMenuItem onClick={handleNewFolderInPanel} className="text-xs">
+                        <FolderPlus className="w-3.5 h-3.5 mr-2" /> New folder
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                        onClick={handlePasteInPanel}
+                        disabled={!clipboard || clipboard.paths.length === 0}
+                        className="text-xs"
+                    >
+                        <ClipboardPaste className="w-3.5 h-3.5 mr-2" /> Paste
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => refresh(tab.id)} className="text-xs">
+                        <RefreshCw className="w-3.5 h-3.5 mr-2" /> Refresh
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={handleShowFolderInFinder} className="text-xs">
+                        <FolderOpen className="w-3.5 h-3.5 mr-2" /> Show in Finder
+                    </ContextMenuItem>
+                </ContextMenuContent>
+            </ContextMenu>
         </div>
     );
 };

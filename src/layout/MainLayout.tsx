@@ -3,7 +3,7 @@ import { FilePanel } from "@/panels/FilePanel";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { SearchDialog } from "@/components/SearchDialog";
 import { Button } from "@/components/ui/button";
-import { Search, Sun, Moon, Settings, Keyboard, Menu, CopyCheck, Plus } from "lucide-react";
+import { Search, Sun, Moon, Settings, Keyboard, Menu, Plus, Trash2, FolderInput } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { PreviewModal } from "@/components/PreviewModal";
 import { Sidebar } from "@/components/Sidebar";
@@ -16,6 +16,10 @@ import { ListTray } from "@/components/ListTray";
 import { WelcomePage } from "@/components/WelcomePage";
 import { DuplicateTab } from "@/components/DuplicateTab";
 import { TabBar } from "@/components/TabBar";
+import { DeleteQueueModal } from "@/components/DeleteQueueModal";
+import { MoveQueueManagerModal } from "@/components/MoveQueueManagerModal";
+import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
+import { useMoveQueueStore } from "@/stores/moveQueueStore";
 
 export const MainLayout = () => {
     const tabs = useExplorerStore((state) => state.tabs);
@@ -32,6 +36,13 @@ export const MainLayout = () => {
     const [searchOpen, setSearchOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [trayOpen, setTrayOpen] = useState(false);
+    const [deleteQueueOpen, setDeleteQueueOpen] = useState(false);
+    const deleteQueue = useDeleteQueueStore((s) => s.queue);
+    const moveQueueTotal = useMoveQueueStore((s) =>
+        s.queues.reduce((sum, q) => sum + q.items.length, 0)
+    );
+    const moveQueueManagerOpen = useMoveQueueStore((s) => s.openManager);
+    const setMoveQueueManagerOpen = useMoveQueueStore((s) => s.setOpenManager);
 
 
     useEffect(() => {
@@ -111,11 +122,41 @@ export const MainLayout = () => {
                     <Button
                         variant="ghost"
                         size="sm"
-                        className="h-8 px-2 gap-2 text-xs font-bold text-primary hover:bg-primary/10"
-                        onClick={() => addTab("/", "duplicates")}
+                        className={cn(
+                            "h-8 px-2 gap-1.5 text-xs font-bold",
+                            deleteQueue.length > 0
+                                ? "text-destructive hover:bg-destructive/10"
+                                : "text-muted-foreground hover:text-destructive"
+                        )}
+                        onClick={() => setDeleteQueueOpen(true)}
+                        title="Delete queue"
                     >
-                        <CopyCheck className="h-4 w-4" />
-                        Find Duplicates
+                        <Trash2 className="h-4 w-4" />
+                        {deleteQueue.length > 0 && (
+                            <span className="min-w-[1.25rem] h-5 px-1 rounded bg-destructive/20 text-destructive flex items-center justify-center">
+                                {deleteQueue.length}
+                            </span>
+                        )}
+                    </Button>
+
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                            "h-8 px-2 gap-1.5 text-xs font-bold",
+                            moveQueueTotal > 0
+                                ? "text-primary hover:bg-primary/10"
+                                : "text-muted-foreground hover:text-primary"
+                        )}
+                        onClick={() => setMoveQueueManagerOpen(true)}
+                        title="Move queue manager"
+                    >
+                        <FolderInput className="h-4 w-4" />
+                        {moveQueueTotal > 0 && (
+                            <span className="min-w-[1.25rem] h-5 px-1 rounded bg-primary/20 text-primary flex items-center justify-center">
+                                {moveQueueTotal}
+                            </span>
+                        )}
                     </Button>
 
                     <Button
@@ -196,6 +237,8 @@ export const MainLayout = () => {
             <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
             <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
             <PreviewModal />
+            <DeleteQueueModal open={deleteQueueOpen} onOpenChange={setDeleteQueueOpen} />
+            <MoveQueueManagerModal open={moveQueueManagerOpen} onOpenChange={setMoveQueueManagerOpen} />
         </div>
     );
 };

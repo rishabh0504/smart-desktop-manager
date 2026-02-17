@@ -2,7 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
+
 use super::settings::ExplorerSettings;
+
+/// Max directory entries to load in one request to avoid OOM on huge dirs (e.g. 10TB volumes).
+const MAX_DIR_ENTRIES: usize = 500_000;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FileEntry {
@@ -43,49 +47,59 @@ pub async fn read_dir_chunked(
 
     let mut all_entries = Vec::new();
     for entry in entries_result.unwrap() {
-        if let Ok(entry) = entry {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            
-            // System/Hidden filtering
-            if !settings.show_hidden_files && name.starts_with('.') {
-                continue;
-            }
-            if !settings.show_system_files && is_hidden_or_system(&name, &entry.path()) {
-                continue;
-            }
-
-            // Blocked extensions filtering
-            let extension = entry.path().extension()
-                .map(|e| e.to_string_lossy().to_string().to_lowercase());
-            
-            if let Some(ref ext) = extension {
-                if settings.blocked_extensions.contains(ext) {
-                    continue;
-                }
-            }
-
-            let metadata = entry.metadata().ok();
-            let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-            let size = if is_dir { None } else { metadata.as_ref().map(|m| m.len()) };
-            let modified = metadata.as_ref()
-                .and_then(|m| m.modified().ok())
-                .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_secs());
-            
-            let path_buf = entry.path();
-            let canonical_path = path_buf.canonicalize().unwrap_or(path_buf.clone());
-            let path_str = path_buf.to_string_lossy().into_owned();
-
-            all_entries.push(FileEntry {
-                name,
-                path: path_str,
-                canonical_path: canonical_path.to_string_lossy().into_owned(),
-                is_dir,
-                size,
-                modified,
-                extension,
-            });
+        if all_entries.len() >= MAX_DIR_ENTRIES {
+            break;
         }
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let name = entry.file_name().to_string_lossy().into_owned();
+
+        if !settings.show_hidden_files && name.starts_with('.') {
+            continue;
+        }
+        if !settings.show_system_files && is_hidden_or_system(&name, &entry.path()) {
+            continue;
+        }
+
+        let extension = entry
+            .path()
+            .extension()
+            .map(|e| e.to_string_lossy().to_string().to_lowercase());
+        if let Some(ref ext) = extension {
+            if settings.blocked_extensions.contains(ext) {
+                continue;
+            }
+        }
+
+        let metadata = entry.metadata().ok();
+        let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+        let size = if is_dir {
+            None
+        } else {
+            metadata.as_ref().map(|m| m.len())
+        };
+        let modified = metadata
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
+
+        let path_buf = entry.path();
+        let path_str = path_buf.to_string_lossy().into_owned();
+        // Avoid canonicalize() per entry — very expensive on large dirs; use path as-is for listing.
+        let canonical_path = path_str.clone();
+
+        all_entries.push(FileEntry {
+            name,
+            path: path_str,
+            canonical_path,
+            is_dir,
+            size,
+            modified,
+            extension,
+        });
     }
 
     // Sorting
@@ -105,7 +119,7 @@ pub async fn read_dir_chunked(
 
     let total = all_entries.len();
     let end = (offset + limit).min(total);
-    let has_more = end < total;
+    let has_more = end < total || total >= MAX_DIR_ENTRIES;
     
     let chunk = if offset < total {
         all_entries[offset..end].to_vec()

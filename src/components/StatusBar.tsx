@@ -56,6 +56,8 @@ export const StatusBar = () => {
 
     const selectionCount = tab.selection.size;
     const totalItems = tab.total;
+    const hasMore = tab.has_more ?? false;
+    const shownCount = tab.entries.length;
 
     return (
         <div className="h-6 bg-muted/30 border-t flex items-center justify-between px-3 text-[10px] text-muted-foreground select-none">
@@ -68,7 +70,7 @@ export const StatusBar = () => {
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1">
                         <FileCode className="w-3 h-3 opacity-50" />
-                        <span>{totalItems} items</span>
+                        <span>{hasMore ? `${shownCount} of ${totalItems} items` : `${totalItems} items`}</span>
                     </div>
 
                     {selectionCount > 0 && (

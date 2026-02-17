@@ -1,12 +1,45 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePreviewStore } from "@/stores/previewStore";
 import { useExplorerStore } from "@/stores/explorerStore";
-import { FileText, Image as ImageIcon, Video, Music, FileQuestion, ChevronLeft, ChevronRight, Loader2, Trash2, FolderOpen, Maximize2, Minimize2 } from "lucide-react";
+import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
+import { useMoveQueueStore } from "@/stores/moveQueueStore";
+import { FileText, Image as ImageIcon, Video, Music, FileQuestion, ChevronLeft, ChevronRight, Loader2, FolderOpen, Maximize2, Minimize2, ListPlus, ListMinus, FolderInput } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 // Removed unused convertFileSrc
+
+function VideoPreview({ src, className }: { src: string; className?: string }) {
+    const videoRef = useRef<HTMLVideoElement>(null);
+    useEffect(() => {
+        const el = videoRef.current;
+        if (!el) return;
+        el.muted = true;
+        const onPlay = () => { el.muted = true; };
+        el.addEventListener("play", onPlay);
+        return () => el.removeEventListener("play", onPlay);
+    }, [src]);
+    return (
+        <video
+            ref={videoRef}
+            controls
+            src={src}
+            className={className}
+            autoPlay
+            muted
+            playsInline
+        />
+    );
+}
 
 export const PreviewModal = () => {
     const target = usePreviewStore((state) => state.target);
@@ -16,6 +49,19 @@ export const PreviewModal = () => {
 
     const activeTabId = useExplorerStore((state) => state.activeTabId);
     const tabs = useExplorerStore((state) => state.tabs);
+    const deleteQueue = useDeleteQueueStore((state) => state.queue);
+    const addToDeleteQueue = useDeleteQueueStore((state) => state.addToQueue);
+    const removeFromDeleteQueue = useDeleteQueueStore((state) => state.removeFromQueue);
+    const moveQueues = useMoveQueueStore((state) => state.queues);
+    const addToMoveQueue = useMoveQueueStore((state) => state.addToQueue);
+    const removeFromMoveQueue = useMoveQueueStore((state) => state.removeFromQueue);
+    const findQueuesContainingPath = useMoveQueueStore((state) => state.findQueuesContainingPath);
+
+    const [selectedMoveQueueId, setSelectedMoveQueueId] = useState<string>("");
+
+    const isInDeleteQueue = target && deleteQueue.some((e) => e.path === target.path);
+    const moveQueueIdsContainingTarget = target ? findQueuesContainingPath(target.path) : [];
+    const isInMoveQueue = moveQueueIdsContainingTarget.length > 0;
 
     // Get entries from the active tab to navigate
     const activeTab = tabs.find(t => t.id === activeTabId);
@@ -23,12 +69,20 @@ export const PreviewModal = () => {
 
     const [content, setContent] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+    const [previewError, setPreviewError] = useState<string | null>(null);
     const [isTheatrical, setIsTheatrical] = useState(false);
 
     // Reset theatrical mode when closed
     useEffect(() => {
         if (!isOpen) setIsTheatrical(false);
     }, [isOpen]);
+
+    // Keep selected move queue valid
+    useEffect(() => {
+        if (moveQueues.length === 0) setSelectedMoveQueueId("");
+        else if (!selectedMoveQueueId || !moveQueues.some((q) => q.id === selectedMoveQueueId))
+            setSelectedMoveQueueId(moveQueues[0].id);
+    }, [moveQueues, selectedMoveQueueId]);
 
     const handleNext = useCallback(() => {
         if (!target || !currentEntries.length) return;
@@ -66,29 +120,29 @@ export const PreviewModal = () => {
         }
     }, [target, currentEntries, openPreview]);
 
-    const handleDelete = useCallback(async () => {
+    const handleAddToDeleteQueue = useCallback(() => {
         if (!target) return;
-        const confirm = await window.confirm(`Are you sure you want to delete "${target.name}"?`);
-        if (!confirm) return;
+        addToDeleteQueue({ ...target, path: target.path, canonical_path: target.canonical_path || target.path });
+        toast.success("Added to delete queue");
+    }, [target, addToDeleteQueue]);
 
-        try {
-            const operationId = crypto.randomUUID();
-            await invoke("delete_items", { operationId, paths: [target.path] });
+    const handleRemoveFromDeleteQueue = useCallback(() => {
+        if (!target) return;
+        removeFromDeleteQueue(target.path);
+        toast.success("Removed from delete queue");
+    }, [target, removeFromDeleteQueue]);
 
-            // Refresh the active tab
-            const refresh = useExplorerStore.getState().refresh;
-            if (activeTabId) refresh(activeTabId);
+    const handleAddToMoveQueue = useCallback(() => {
+        if (!target || !selectedMoveQueueId) return;
+        addToMoveQueue(selectedMoveQueueId, { ...target, path: target.path, canonical_path: target.canonical_path || target.path });
+        toast.success("Added to move queue");
+    }, [target, selectedMoveQueueId, addToMoveQueue]);
 
-            // Move to next item or close if it was the last one
-            if (currentEntries.length > 1) {
-                handleNext();
-            } else {
-                closePreview();
-            }
-        } catch (error) {
-            console.error("Failed to delete item:", error);
-        }
-    }, [target, activeTabId, currentEntries, handleNext, closePreview]);
+    const handleRemoveFromMoveQueue = useCallback(() => {
+        if (!target) return;
+        moveQueueIdsContainingTarget.forEach((queueId) => removeFromMoveQueue(queueId, target.path));
+        toast.success("Removed from move queue(s)");
+    }, [target, moveQueueIdsContainingTarget, removeFromMoveQueue]);
 
     const handleShowInFinder = () => {
         if (target) {
@@ -112,20 +166,30 @@ export const PreviewModal = () => {
     useEffect(() => {
         if (!target || !isOpen) {
             setContent(null);
+            setPreviewError(null);
             return;
         }
 
         setLoading(true);
+        setPreviewError(null);
 
         if (isText) {
             invoke<string>("get_file_text_content", { path: target.path })
-                .then(setContent)
-                .catch(err => console.error("Failed to load text:", err))
+                .then((c) => { setContent(c); setPreviewError(null); })
+                .catch((err: unknown) => {
+                    const msg = typeof err === "string" ? err : (err as Error)?.message ?? "Failed to load file";
+                    setPreviewError(msg);
+                    setContent(null);
+                })
                 .finally(() => setLoading(false));
         } else if (isPdf) {
             invoke<string>("get_file_base64_content", { path: target.path })
-                .then(setContent)
-                .catch(err => console.error("Failed to load PDF:", err))
+                .then((c) => { setContent(c); setPreviewError(null); })
+                .catch((err: unknown) => {
+                    const msg = typeof err === "string" ? err : (err as Error)?.message ?? "Failed to load file";
+                    setPreviewError(msg);
+                    setContent(null);
+                })
                 .finally(() => setLoading(false));
         } else if (isImage || isVideo || isAudio) {
             setContent(`vmedia://localhost/${encodeURIComponent(target.path)}`);
@@ -143,9 +207,9 @@ export const PreviewModal = () => {
                 handleNext();
             } else if (e.key === "ArrowLeft") {
                 handlePrev();
-            } else if (e.key === "Delete" || ((e.metaKey || e.ctrlKey) && e.key === "Backspace")) {
+            } else             if (e.key === "Delete" || ((e.metaKey || e.ctrlKey) && e.key === "Backspace")) {
                 e.preventDefault();
-                handleDelete();
+                handleAddToDeleteQueue();
             } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "o") {
                 e.preventDefault();
                 handleOpenWithApp();
@@ -167,7 +231,7 @@ export const PreviewModal = () => {
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [isOpen, handleNext, handlePrev, handleDelete, isTheatrical]);
+    }, [isOpen, handleNext, handlePrev, handleAddToDeleteQueue, isTheatrical]);
 
     if (!target) return null;
 
@@ -211,7 +275,14 @@ export const PreviewModal = () => {
                 </DialogHeader>
 
                 <div className="flex-1 overflow-auto relative group flex items-center justify-center bg-black/5 dark:bg-white/5 p-4 data-[theatrical=true]:bg-black data-[theatrical=true]:p-0" data-theatrical={isTheatrical}>
-                    {loading && (
+                    {previewError && (
+                        <div className="flex flex-col items-center justify-center gap-4 p-8 text-center max-w-md">
+                            <FileQuestion className="w-12 h-12 text-amber-500" />
+                            <p className="text-sm font-medium text-muted-foreground">{previewError}</p>
+                            <p className="text-xs text-muted-foreground/80">Use &quot;Open with App&quot; below to open this file.</p>
+                        </div>
+                    )}
+                    {loading && !previewError && (
                         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm transition-all duration-300">
                             <div className="flex items-center gap-3 text-primary animate-pulse font-medium bg-background/80 px-6 py-3 rounded-full shadow-lg border">
                                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -219,7 +290,7 @@ export const PreviewModal = () => {
                             </div>
                         </div>
                     )}
-                    {isImage && mediaSrc && (
+                    {isImage && mediaSrc && !previewError && (
                         <img
                             src={mediaSrc}
                             alt={target.name}
@@ -228,17 +299,11 @@ export const PreviewModal = () => {
                         />
                     )}
 
-                    {isVideo && mediaSrc && (
-                        <video
-                            controls
-                            src={mediaSrc}
-                            className="w-full h-full object-contain shadow-2xl rounded-sm"
-                            autoPlay
-                            muted
-                        />
+                    {isVideo && mediaSrc && !previewError && (
+                        <VideoPreview src={mediaSrc} className="w-full h-full object-contain shadow-2xl rounded-sm" />
                     )}
 
-                    {isAudio && (
+                    {isAudio && !previewError && (
                         <div className="flex flex-col items-center gap-6">
                             <div className="w-32 h-32 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
                                 <Music className="w-16 h-16 text-primary/50" />
@@ -247,13 +312,13 @@ export const PreviewModal = () => {
                         </div>
                     )}
 
-                    {isText && content && (
+                    {isText && content && !previewError && (
                         <div className="w-full h-full p-6 font-mono text-xs bg-muted/20 border rounded-lg whitespace-pre overflow-auto select-text scrollbar-thin scrollbar-thumb-muted-foreground/20">
                             {content}
                         </div>
                     )}
 
-                    {isPdf && content && (
+                    {isPdf && content && !previewError && (
                         <embed
                             src={content}
                             type="application/pdf"
@@ -261,7 +326,7 @@ export const PreviewModal = () => {
                         />
                     )}
 
-                    {!isImage && !isVideo && !isAudio && !isText && !isPdf && !loading && (
+                    {!isImage && !isVideo && !isAudio && !isText && !isPdf && !loading && !previewError && (
                         <div className="flex flex-col items-center gap-4 text-muted-foreground bg-muted/20 p-8 rounded-xl border border-dashed">
                             <FileQuestion className="w-16 h-16 opacity-50" />
                             <div className="text-center">
@@ -303,14 +368,63 @@ export const PreviewModal = () => {
                             <FolderOpen className="h-4 w-4" />
                         </Button>
                         <Button
-                            variant="destructive"
+                            variant="outline"
                             size="icon"
-                            className="h-8 w-8 ml-2"
-                            onClick={handleDelete}
-                            title="Delete File"
+                            className="h-8 w-8 ml-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={handleAddToDeleteQueue}
+                            title="Add to delete queue"
                         >
-                            <Trash2 className="h-4 w-4" />
+                            <ListPlus className="h-4 w-4" />
                         </Button>
+                        {isInDeleteQueue && (
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8 ml-2 text-destructive hover:bg-destructive/10"
+                                onClick={handleRemoveFromDeleteQueue}
+                                title="Remove from delete queue"
+                            >
+                                <ListMinus className="h-4 w-4" />
+                            </Button>
+                        )}
+                        {moveQueues.length > 0 && (
+                            <>
+                                <Select value={selectedMoveQueueId} onValueChange={setSelectedMoveQueueId}>
+                                    <SelectTrigger className="h-8 min-w-[120px] text-xs" title="Move queue">
+                                        <SelectValue placeholder="Queue" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {moveQueues.map((q) => (
+                                            <SelectItem key={q.id} value={q.id}>
+                                                {q.name} ({q.items.length})
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 gap-1 text-primary"
+                                    onClick={handleAddToMoveQueue}
+                                    disabled={!selectedMoveQueueId}
+                                    title="Add to move queue"
+                                >
+                                    <FolderInput className="h-4 w-4" />
+                                    Add to move
+                                </Button>
+                            </>
+                        )}
+                        {isInMoveQueue && (
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8 text-primary hover:bg-primary/10"
+                                onClick={handleRemoveFromMoveQueue}
+                                title="Remove from move queue"
+                            >
+                                <ListMinus className="h-4 w-4" />
+                            </Button>
+                        )}
                     </div>
                 </div>
             </DialogContent>

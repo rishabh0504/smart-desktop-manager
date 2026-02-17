@@ -1,5 +1,4 @@
 use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TreeNode {
@@ -24,11 +23,8 @@ pub fn get_tree_nodes(path: String) -> Result<Vec<TreeNode>, String> {
             let path = entry.path();
             if path.is_dir() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                
-                // Fast check for children (only directories count for the tree)
-                let has_children = std::fs::read_dir(&path)
-                    .map(|mut it| it.any(|e| e.map(|entry| entry.path().is_dir()).unwrap_or(false)))
-                    .unwrap_or(false);
+                // Lazy: assume dirs may have children; avoid N read_dir calls for huge roots (10TB).
+                let has_children = true;
 
                 nodes.push(TreeNode {
                     name,

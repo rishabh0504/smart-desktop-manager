@@ -1,7 +1,8 @@
+import { useRef, useEffect } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useDedupeStore } from "@/stores/dedupeStore";
 import { Button } from "@/components/ui/button";
 import { Progress } from "./ui/progress";
-import { ScrollArea } from "./ui/scroll-area";
 import { Checkbox } from "./ui/checkbox";
 import {
     Search,
@@ -24,7 +25,10 @@ interface DuplicateTabProps {
     tabId: string;
 }
 
+const DUPLICATE_ROW_ESTIMATE = 140;
+
 export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
+    const scrollRef = useRef<HTMLDivElement>(null);
     const scanning = useDedupeStore((state) => state.scanning);
     const progress = useDedupeStore((state) => state.progress);
     const duplicates = useDedupeStore((state) => state.duplicates);
@@ -56,6 +60,17 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
         const remainingSeconds = seconds % 60;
         return `${minutes}m ${remainingSeconds}s`;
     };
+
+    const virtualizer = useVirtualizer({
+        count: duplicates.length,
+        getScrollElement: () => scrollRef.current,
+        estimateSize: () => DUPLICATE_ROW_ESTIMATE,
+        overscan: 5,
+    });
+
+    useEffect(() => {
+        virtualizer.measure();
+    }, [duplicates.length, virtualizer]);
 
     return (
         <div className="flex flex-col h-full bg-background border rounded-md overflow-hidden transition-colors">
@@ -239,61 +254,80 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                         </div>
                     </div>
 
-                    <ScrollArea className="flex-1">
-                        <div className="p-6 space-y-6">
-                            {duplicates.map((group, idx) => (
-                                <div key={idx} className="bg-muted/10 border rounded-xl overflow-hidden shadow-sm">
-                                    <div className="bg-muted/30 px-4 py-2 border-b flex justify-between items-center">
-                                        <div className="flex items-center gap-3">
-                                            <div className="p-1.5 bg-background rounded-md border shadow-sm">
-                                                <FileText className="w-4 h-4 text-muted-foreground" />
+                    <div ref={scrollRef} className="flex-1 overflow-auto min-h-0">
+                        <div
+                            style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+                            className="p-6"
+                        >
+                            {virtualizer.getVirtualItems().map((virtualRow) => {
+                                const group = duplicates[virtualRow.index];
+                                if (!group) return null;
+                                return (
+                                    <div
+                                        key={`${group.hash}-${virtualRow.index}`}
+                                        style={{
+                                            position: "absolute",
+                                            top: 0,
+                                            left: 0,
+                                            width: "100%",
+                                            transform: `translateY(${virtualRow.start + 24}px)`,
+                                            paddingBottom: 24,
+                                        }}
+                                    >
+                                        <div className="bg-muted/10 border rounded-xl overflow-hidden shadow-sm">
+                                            <div className="bg-muted/30 px-4 py-2 border-b flex justify-between items-center">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-1.5 bg-background rounded-md border shadow-sm">
+                                                        <FileText className="w-4 h-4 text-muted-foreground" />
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-xs font-bold truncate max-w-[300px]">
+                                                            {group.paths[0].split(/[/\\]/).pop()}
+                                                        </div>
+                                                        <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                                                            {formatSize(group.size)} • {group.paths.length} Copies
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="text-[10px] font-mono text-muted-foreground/30 uppercase">
+                                                    Hash: {String(group.hash).slice(0, 8)}...
+                                                </div>
                                             </div>
-                                            <div>
-                                                <div className="text-xs font-bold truncate max-w-[300px]">
-                                                    {group.paths[0].split(/[/\\]/).pop()}
-                                                </div>
-                                                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                                                    {formatSize(group.size)} • {group.paths.length} Copies
-                                                </div>
+                                            <div className="p-2 space-y-1">
+                                                {group.paths.map(path => (
+                                                    <div
+                                                        key={path}
+                                                        className={cn(
+                                                            "flex items-center gap-3 px-3 py-2 rounded-lg transition-colors cursor-pointer group",
+                                                            selectedPaths.has(path) ? "bg-destructive/5 hover:bg-destructive/10" : "hover:bg-accent"
+                                                        )}
+                                                        onClick={() => toggleSelection(path)}
+                                                    >
+                                                        <Checkbox
+                                                            checked={selectedPaths.has(path)}
+                                                            onCheckedChange={(checked: boolean | "indeterminate") => {
+                                                                if (typeof checked === "boolean") {
+                                                                    toggleSelection(path);
+                                                                }
+                                                            }}
+                                                            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                                            className="data-[state=checked]:bg-destructive data-[state=checked]:border-destructive"
+                                                        />
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-xs font-medium truncate group-hover:underline lowercase">{path}</div>
+                                                        </div>
+                                                        <div className="text-[10px] font-bold text-muted-foreground/40 uppercase group-hover:text-primary transition-colors">
+                                                            {path.match(/[/\\]Users[/\\]/i) ? "User Space" : "System"}
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </div>
                                         </div>
-                                        <div className="text-[10px] font-mono text-muted-foreground/30 uppercase">
-                                            Hash: {group.hash.slice(0, 8)}...
-                                        </div>
                                     </div>
-                                    <div className="p-2 space-y-1">
-                                        {group.paths.map(path => (
-                                            <div
-                                                key={path}
-                                                className={cn(
-                                                    "flex items-center gap-3 px-3 py-2 rounded-lg transition-colors cursor-pointer group",
-                                                    selectedPaths.has(path) ? "bg-destructive/5 hover:bg-destructive/10" : "hover:bg-accent"
-                                                )}
-                                                onClick={() => toggleSelection(path)}
-                                            >
-                                                <Checkbox
-                                                    checked={selectedPaths.has(path)}
-                                                    onCheckedChange={(checked: boolean | "indeterminate") => {
-                                                        if (typeof checked === "boolean") {
-                                                            toggleSelection(path);
-                                                        }
-                                                    }}
-                                                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                                                    className="data-[state=checked]:bg-destructive data-[state=checked]:border-destructive"
-                                                />
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="text-xs font-medium truncate group-hover:underline lowercase">{path}</div>
-                                                </div>
-                                                <div className="text-[10px] font-bold text-muted-foreground/40 uppercase group-hover:text-primary transition-colors">
-                                                    {path.match(/[/\\]Users[/\\]/i) ? "User Space" : "System"}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
-                    </ScrollArea>
+                    </div>
                 </div>
             )}
 

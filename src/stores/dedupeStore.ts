@@ -58,10 +58,26 @@ export const useDedupeStore = create<DedupeStore>((set, get) => ({
 
         set({ scanning: true, duplicates: [], progress: null, selectedPaths: new Set() });
 
+        const DEDUPE_BATCH_MS = 150;
+        const DEDUPE_BATCH_SIZE = 25;
+        let buffer: DuplicateGroup[] = [];
+        let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const flush = () => {
+            if (flushTimer) {
+                clearTimeout(flushTimer);
+                flushTimer = null;
+            }
+            if (buffer.length === 0) return;
+            const batch = [...buffer];
+            buffer = [];
+            set(state => ({ duplicates: [...state.duplicates, ...batch] }));
+        };
+
         const unlistenFound = await listen<DuplicateGroup>("duplicate-found", (event) => {
-            set(state => ({
-                duplicates: [...state.duplicates, event.payload]
-            }));
+            buffer.push(event.payload);
+            if (buffer.length >= DEDUPE_BATCH_SIZE) flush();
+            else if (!flushTimer) flushTimer = setTimeout(flush, DEDUPE_BATCH_MS);
         });
 
         const unlistenProgress = await listen<ProgressEvent>("dedupe-progress", (event) => {
@@ -70,12 +86,14 @@ export const useDedupeStore = create<DedupeStore>((set, get) => ({
 
         try {
             await invoke("find_duplicates", { paths: scanQueue });
+            flush();
             set({ scanning: false });
         } catch (error) {
             console.error("Dedupe failed:", error);
             toast.error(`Dedupe failed: ${error}`);
             set({ scanning: false });
         } finally {
+            flush();
             unlistenFound();
             unlistenProgress();
         }

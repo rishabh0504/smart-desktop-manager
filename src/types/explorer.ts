@@ -21,6 +21,7 @@ export interface PanelState {
     path: string;
     entries: FileEntry[];
     total: number;
+    has_more: boolean;
     loading: boolean;
     sortBy: SortField;
     order: SortOrder;
