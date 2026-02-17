@@ -74,11 +74,20 @@ fn main() {
 
     for model in models {
         println!("- Checking Model: {}...", model);
+        // Skip pull if model already exists (e.g. from a previous install or cached by Ollama)
+        let list_output = Command::new(ollama_bin).arg("list").output();
+        if let Ok(out) = list_output {
+            let list_stdout = String::from_utf8_lossy(&out.stdout);
+            let model_base = model.split(':').next().unwrap_or(model.as_ref());
+            if list_stdout.lines().any(|line| line.contains(model_base) || line.contains(&model)) {
+                println!("  ✔ {} already present, skipping download.", model);
+                continue;
+            }
+        }
         let status = Command::new(ollama_bin)
             .arg("pull")
-            .arg(model)
+            .arg(&model)
             .status();
-        
         match status {
             Ok(s) if s.success() => println!("  ✔ {} ready.", model),
             _ => {

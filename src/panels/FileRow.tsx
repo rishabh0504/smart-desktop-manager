@@ -1,10 +1,22 @@
 import React from "react";
 import { FileEntry } from "@/types/explorer";
-import { File, Folder, Plus } from "lucide-react";
+import { File, Folder, Plus, ImageIcon, Video, Music, FileText, FileSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { Button } from "@/components/ui/button";
 import { createDragGhost } from "@/lib/dragUtils";
+import { isVideoExtension } from "@/lib/fileTypes";
+
+function getRowIcon(entry: FileEntry) {
+    if (entry.is_dir) return <Folder className="w-4 h-4 fill-current text-sky-500" />;
+    const ext = entry.extension?.toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext || '')) return <ImageIcon className="w-4 h-4 text-blue-500" />;
+    if (isVideoExtension(ext)) return <Video className="w-4 h-4 text-purple-500" />;
+    if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext || '')) return <Music className="w-4 h-4 text-pink-500" />;
+    if (['txt', 'md', 'js', 'ts', 'tsx', 'py', 'rs', 'json'].includes(ext || '')) return <FileText className="w-4 h-4 text-slate-500" />;
+    if (['pdf'].includes(ext || '')) return <FileSearch className="w-4 h-4 text-red-500" />;
+    return <File className="w-4 h-4 text-muted-foreground" />;
+}
 
 interface FileRowProps {
     entry: FileEntry;
@@ -46,12 +58,8 @@ export const FileRow = React.memo(({ entry, selected, isActive, onClick, style, 
             onClick={onClick}
             data-path={entry.path}
         >
-            <div className="mr-3 text-muted-foreground">
-                {entry.is_dir ? (
-                    <Folder className="w-4 h-4 fill-current text-blue-400" />
-                ) : (
-                    <File className="w-4 h-4" />
-                )}
+            <div className="mr-3 shrink-0">
+                {getRowIcon(entry)}
             </div>
             <div className="flex-1 truncate text-sm">
                 {entry.name}

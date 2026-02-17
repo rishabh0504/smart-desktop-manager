@@ -57,6 +57,17 @@ pub fn check_ollama_status() -> bool {
 
 #[tauri::command]
 pub async fn pull_model(app: AppHandle, model: String) -> Result<(), String> {
+    // Skip pull if model already exists (cache-friendly)
+    let list_output = Command::new("ollama").arg("list").output();
+    if let Ok(out) = list_output {
+        let list_stdout = String::from_utf8_lossy(&out.stdout);
+        let model_base = model.split(':').next().unwrap_or(model.as_str());
+        if list_stdout.lines().any(|line| line.contains(model_base) || line.contains(&model)) {
+            let _ = app.emit("model-pull-complete", &model);
+            return Ok(());
+        }
+    }
+
     println!("Pulling model: {}", model);
     let output = Command::new("ollama")
         .arg("pull")

@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Trash2, FileText, FileQuestion, Folder, Loader2, X, ChevronUp, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { isVideoExtension } from "@/lib/fileTypes";
 
 function PreviewPane({ entry }: { entry: FileEntry | null }) {
     const [content, setContent] = useState<string | null>(null);
@@ -34,7 +35,7 @@ function PreviewPane({ entry }: { entry: FileEntry | null }) {
         const isText = ["txt", "md", "js", "ts", "json", "rs", "css", "html", "py", "sh", "yml", "yaml"].includes(ext);
         const isPdf = ext === "pdf";
         const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext);
-        const isVideo = ["mp4", "webm", "ogg", "mov"].includes(ext);
+        const isVideo = isVideoExtension(ext);
         const isAudio = ["mp3", "wav", "ogg", "flac"].includes(ext);
 
         if (isText) {
@@ -67,7 +68,7 @@ function PreviewPane({ entry }: { entry: FileEntry | null }) {
 
     const ext = (entry.extension ?? "").toLowerCase();
     const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext);
-    const isVideo = ["mp4", "webm", "ogg", "mov"].includes(ext);
+    const isVideo = isVideoExtension(ext);
     const isAudio = ["mp3", "wav", "ogg", "flac"].includes(ext);
     const isText = ["txt", "md", "js", "ts", "json", "rs", "css", "html", "py", "sh", "yml", "yaml"].includes(ext);
     const isPdf = ext === "pdf";

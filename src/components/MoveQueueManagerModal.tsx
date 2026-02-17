@@ -27,6 +27,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { isVideoExtension } from "@/lib/fileTypes";
 
 interface MoveQueueManagerModalProps {
     open: boolean;
@@ -94,7 +95,7 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
         const isText = ["txt", "md", "js", "ts", "json", "rs", "css", "html", "py", "sh", "yml", "yaml"].includes(ext);
         const isPdf = ext === "pdf";
         const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext);
-        const isVideo = ["mp4", "webm", "ogg", "mov"].includes(ext);
+        const isVideo = isVideoExtension(ext);
         const isAudio = ["mp3", "wav", "ogg", "flac"].includes(ext);
 
         setPreviewLoading(true);
@@ -324,7 +325,7 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
                                                     {(() => {
                                                         const ext = (selectedEntry.extension ?? "").toLowerCase();
                                                         const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext);
-                                                        const isVideo = ["mp4", "webm", "ogg", "mov"].includes(ext);
+                                                        const isVideo = isVideoExtension(ext);
                                                         const isAudio = ["mp3", "wav", "ogg", "flac"].includes(ext);
                                                         const isText = ["txt", "md", "js", "ts", "json", "rs", "css", "html", "py", "sh", "yml", "yaml"].includes(ext);
                                                         const isPdf = ext === "pdf";

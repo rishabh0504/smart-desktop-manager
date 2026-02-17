@@ -2,10 +2,12 @@ import { FileEntry } from "@/types/explorer";
 import { cn } from "@/lib/utils";
 import { File, Folder, ImageIcon, Video, Music, FileText, FileSearch, Plus } from "lucide-react";
 import { useExplorerStore } from "@/stores/explorerStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { Button } from "@/components/ui/button";
 import { createDragGhost } from "@/lib/dragUtils";
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { isVideoExtension } from "@/lib/fileTypes";
 
 interface GridTileProps {
     entry: FileEntry;
@@ -18,20 +20,30 @@ interface GridTileProps {
 
 export const GridTile = ({ entry, selected, isActive, onClick, style, onToggleSelect }: GridTileProps) => {
     const [thumbnail, setThumbnail] = useState<string | null>(null);
+    const gridWidth = useSettingsStore((s) => s.grid_thumbnail_width);
+    const gridHeight = useSettingsStore((s) => s.grid_thumbnail_height);
+
+    const isImage = !entry.is_dir && ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(entry.extension?.toLowerCase() || '');
+    const isVideo = !entry.is_dir && isVideoExtension(entry.extension);
 
     useEffect(() => {
-        if (!entry.is_dir && ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(entry.extension?.toLowerCase() || '')) {
-            invoke<string>("get_thumbnail", { path: entry.path, width: 128, height: 128 })
+        if (isImage) {
+            invoke<string>("get_thumbnail", { path: entry.path, width: gridWidth, height: gridHeight })
                 .then(setThumbnail)
-                .catch(() => { }); // SILENT error for thumbnails
+                .catch(() => { });
+        } else if (isVideo) {
+            invoke<string>("get_video_thumbnail", { path: entry.path, width: gridWidth, height: gridHeight })
+                .then(setThumbnail)
+                .catch(() => { });
         }
-    }, [entry.path, entry.extension, entry.is_dir]);
+    }, [entry.path, entry.extension, entry.is_dir, isImage, isVideo, gridWidth, gridHeight]);
+
     const getIcon = () => {
-        if (entry.is_dir) return <Folder className="w-10 h-10 text-primary/60" />;
+        if (entry.is_dir) return <Folder className="w-10 h-10 text-sky-500" />;
 
         const ext = entry.extension?.toLowerCase();
         if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext || '')) return <ImageIcon className="w-10 h-10 text-blue-500/60" />;
-        if (['mp4', 'webm', 'mov', 'mkv'].includes(ext || '')) return <Video className="w-10 h-10 text-purple-500/60" />;
+        if (isVideoExtension(ext)) return <Video className="w-10 h-10 text-purple-500/60" />;
         if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext || '')) return <Music className="w-10 h-10 text-pink-500/60" />;
         if (['txt', 'md', 'js', 'ts', 'tsx', 'py'].includes(ext || '')) return <FileText className="w-10 h-10 text-slate-500/60" />;
         if (['pdf'].includes(ext || '')) return <FileSearch className="w-10 h-10 text-red-500/60" />;
@@ -83,10 +95,15 @@ export const GridTile = ({ entry, selected, isActive, onClick, style, onToggleSe
                 {selected ? <Plus className="w-3 h-3 rotate-45" /> : <Plus className="w-3 h-3" />}
             </Button>
 
-            <div className="relative w-28 h-28 flex items-center justify-center overflow-hidden rounded-md transition-all group-hover:shadow-md bg-muted/20">
+            <div
+                className="relative flex items-center justify-center overflow-hidden rounded-md transition-all group-hover:shadow-md bg-muted/20 shrink-0"
+                style={{ width: gridWidth, height: gridHeight, minWidth: gridWidth, minHeight: gridHeight }}
+            >
                 {thumbnail ? (
                     <img src={thumbnail} className="w-full h-full object-cover" alt="" />
-                ) : getIcon()}
+                ) : (
+                    getIcon()
+                )}
                 {/* Selection indicator */}
                 {selected && (
                     <div className="absolute -top-1 -right-1 w-4 h-4 bg-primary rounded-full border-2 border-background flex items-center justify-center shadow-sm z-10" />

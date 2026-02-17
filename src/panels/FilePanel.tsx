@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useCallback, useState, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { usePreviewStore } from "@/stores/previewStore";
@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
+import { isVideoExtension } from "@/lib/fileTypes";
 
 interface FilePanelProps {
     tabId: string;
@@ -58,7 +59,7 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
     const clipboard = useExplorerStore((state) => state.clipboard);
     const pasteFromClipboard = useExplorerStore((state) => state.pasteFromClipboard);
     const { openPreview } = usePreviewStore();
-    const { settings } = useSettingsStore();
+    const { settings, grid_thumbnail_width } = useSettingsStore();
 
     const parentRef = useRef<HTMLDivElement>(null);
     const loadMoreTriggered = useRef(false);
@@ -70,15 +71,17 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
     const isGrid = tab.viewMode === "grid";
     const isActive = activeTabId === tab.id;
 
+    const groupedRows = useMemo(() => groupEntries(tab.entries), [tab.entries]);
+
     const rowVirtualizer = useVirtualizer({
-        count: tab.entries.length,
+        count: groupedRows.length,
         getScrollElement: () => parentRef.current,
-        estimateSize: () => 36,
+        estimateSize: (i) => (groupedRows[i]?.kind === "header" ? 28 : 36),
         overscan: 20,
         enabled: !isGrid,
     });
 
-    useEffect(() => rowVirtualizer.measure(), [tab.entries, tab.viewMode]);
+    useEffect(() => rowVirtualizer.measure(), [tab.entries, tab.viewMode, groupedRows.length]);
 
     const onScroll = useCallback(() => {
         const el = parentRef.current;
@@ -481,25 +484,64 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
                     />
                 )}
                 {isGrid ? (
-                    <div className="grid gap-4 p-4 grid-cols-[repeat(auto-fill,minmax(120px,1fr))]">
-                        {tab.entries.map((entry) => (
-                            <FileContextMenu key={entry.path} entry={entry} tabId={tab.id}>
-                                <GridTile
-                                    entry={entry}
-                                    selected={tab.selection.has(entry.path)}
-                                    isActive={isActive}
-                                    onClick={(e) => onItemClick(entry, e)}
-                                    onToggleSelect={() => toggleSelection(tab.id, entry.path)}
-                                />
-                            </FileContextMenu>
-                        ))}
+                    <div className="p-4 space-y-6">
+                        {GROUP_ORDER.map(({ key, label }) => {
+                            const groupEntries = groupedRows.filter(
+                                (r) => r.kind === "entry" && getGroupKey(r.entry) === key
+                            ) as { kind: "entry"; entry: FileEntry }[];
+                            if (groupEntries.length === 0) return null;
+                            return (
+                                <div key={key}>
+                                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 px-1">
+                                        {label}
+                                    </div>
+                                    <hr className="border-border/60 mb-2" />
+                                    <div
+                                        className="grid gap-4"
+                                        style={{
+                                            gridTemplateColumns: `repeat(auto-fill, minmax(${Math.max(80, grid_thumbnail_width + 48)}px, 1fr))`,
+                                        }}
+                                    >
+                                        {groupEntries.map(({ entry }) => (
+                                            <FileContextMenu key={entry.path} entry={entry} tabId={tab.id}>
+                                                <GridTile
+                                                    entry={entry}
+                                                    selected={tab.selection.has(entry.path)}
+                                                    isActive={isActive}
+                                                    onClick={(e) => onItemClick(entry, e)}
+                                                    onToggleSelect={() => toggleSelection(tab.id, entry.path)}
+                                                />
+                                            </FileContextMenu>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 ) : (
                     <div style={{ height: rowVirtualizer.getTotalSize(), width: "100%", position: "relative" }}>
                         {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                            const entry = tab.entries[virtualRow.index];
-                            if (!entry) return null;
-
+                            const row = groupedRows[virtualRow.index];
+                            if (!row) return null;
+                            if (row.kind === "header") {
+                                return (
+                                    <div
+                                        key={`header-${virtualRow.index}-${row.label}`}
+                                        style={{
+                                            position: "absolute",
+                                            top: 0,
+                                            left: 0,
+                                            width: "100%",
+                                            height: virtualRow.size,
+                                            transform: `translateY(${virtualRow.start}px)`,
+                                        }}
+                                        className="flex items-center px-4 py-1.5 bg-muted/30 border-b text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                                    >
+                                        {row.label}
+                                    </div>
+                                );
+                            }
+                            const entry = row.entry;
                             return (
                                 <div
                                     key={entry.path}
@@ -571,10 +613,46 @@ function getFileType(ext?: string): string {
     if (!ext) return "other";
     const e = ext.toLowerCase();
     if (["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(e)) return "image";
-    if (["mp4", "webm", "mov", "mkv"].includes(e)) return "video";
+    if (isVideoExtension(e)) return "video";
     if (["mp3", "wav", "ogg", "m4a"].includes(e)) return "audio";
     if (["txt", "md", "js", "ts", "tsx", "py", "rs", "json"].includes(e)) return "text";
     if (["pdf"].includes(e)) return "pdf";
     if (["zip", "tar", "gz", "7z", "rar"].includes(e)) return "archive";
     return "other";
+}
+
+type GroupRow = { kind: "header"; label: string } | { kind: "entry"; entry: FileEntry };
+
+const GROUP_ORDER: { key: string; label: string }[] = [
+    { key: "folder", label: "Folders" },
+    { key: "image", label: "Images" },
+    { key: "video", label: "Videos" },
+    { key: "audio", label: "Audio" },
+    { key: "document", label: "Documents" },
+    { key: "archive", label: "Archives" },
+    { key: "other", label: "Other" },
+];
+
+function getGroupKey(entry: FileEntry): string {
+    if (entry.is_dir) return "folder";
+    const t = getFileType(entry.extension ?? undefined);
+    if (t === "pdf" || t === "text") return "document";
+    return t;
+}
+
+function groupEntries(entries: FileEntry[]): GroupRow[] {
+    const byGroup = new Map<string, FileEntry[]>();
+    for (const e of entries) {
+        const key = getGroupKey(e);
+        if (!byGroup.has(key)) byGroup.set(key, []);
+        byGroup.get(key)!.push(e);
+    }
+    const rows: GroupRow[] = [];
+    for (const { key, label } of GROUP_ORDER) {
+        const groupEntries = byGroup.get(key);
+        if (!groupEntries?.length) continue;
+        rows.push({ kind: "header", label });
+        for (const entry of groupEntries) rows.push({ kind: "entry", entry });
+    }
+    return rows;
 }

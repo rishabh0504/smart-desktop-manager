@@ -7,8 +7,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { Eye, EyeOff, Shield, Image, Video, Music, FileText, FileSearch, Trash2, Plus } from "lucide-react";
-import { useState } from "react";
+import { Eye, EyeOff, Shield, Image, Video, Music, FileText, FileSearch, Trash2, Plus, LayoutGrid } from "lucide-react";
+import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 
 interface SettingsDialogProps {
@@ -18,11 +18,39 @@ interface SettingsDialogProps {
 
 export const SettingsDialog = ({ open, onOpenChange }: SettingsDialogProps) => {
     const settings = useSettingsStore((state) => state.settings);
+    const grid_thumbnail_width = useSettingsStore((state) => state.grid_thumbnail_width);
+    const grid_thumbnail_height = useSettingsStore((state) => state.grid_thumbnail_height);
     const updateSettings = useSettingsStore((state) => state.updateSettings);
     const updatePreviewSettings = useSettingsStore((state) => state.updatePreviewSettings);
+    const updateGridThumbnailSize = useSettingsStore((state) => state.updateGridThumbnailSize);
     const addBlockedExtension = useSettingsStore((state) => state.addBlockedExtension);
     const removeBlockedExtension = useSettingsStore((state) => state.removeBlockedExtension);
     const [newExt, setNewExt] = useState("");
+    const [widthInput, setWidthInput] = useState<string>("");
+    const [heightInput, setHeightInput] = useState<string>("");
+
+    const syncGridInputsFromStore = () => {
+        setWidthInput(String(grid_thumbnail_width));
+        setHeightInput(String(grid_thumbnail_height));
+    };
+
+    useEffect(() => {
+        if (open) syncGridInputsFromStore();
+    }, [open, grid_thumbnail_width, grid_thumbnail_height]);
+
+    const commitWidth = () => {
+        const n = Number(widthInput);
+        const parsed = Number.isFinite(n) ? Math.min(400, Math.max(20, Math.round(n))) : 30;
+        updateGridThumbnailSize(parsed, grid_thumbnail_height);
+        setWidthInput(String(parsed));
+    };
+
+    const commitHeight = () => {
+        const n = Number(heightInput);
+        const parsed = Number.isFinite(n) ? Math.min(400, Math.max(20, Math.round(n))) : 30;
+        updateGridThumbnailSize(grid_thumbnail_width, parsed);
+        setHeightInput(String(parsed));
+    };
 
     const handleAddExt = () => {
         if (newExt) {
@@ -103,6 +131,44 @@ export const SettingsDialog = ({ open, onOpenChange }: SettingsDialogProps) => {
                                 active={settings.preview_enabled.pdf}
                                 onClick={() => updatePreviewSettings({ pdf: !settings.preview_enabled.pdf })}
                             />
+                        </div>
+                    </section>
+
+                    {/* Grid view thumbnail size */}
+                    <section className="space-y-3">
+                        <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                            <LayoutGrid className="w-3 h-3" /> Grid view thumbnail size
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                            Width and height (px) of the content preview in grid view. Stored in localStorage.
+                        </p>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="text-[10px] font-medium text-muted-foreground block mb-1">Width (px)</label>
+                                <Input
+                                    type="number"
+                                    min={20}
+                                    max={400}
+                                    value={widthInput}
+                                    onChange={(e) => setWidthInput(e.target.value)}
+                                    onBlur={commitWidth}
+                                    onKeyDown={(e) => e.key === "Enter" && commitWidth()}
+                                    className="h-8 text-xs"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-medium text-muted-foreground block mb-1">Height (px)</label>
+                                <Input
+                                    type="number"
+                                    min={20}
+                                    max={400}
+                                    value={heightInput}
+                                    onChange={(e) => setHeightInput(e.target.value)}
+                                    onBlur={commitHeight}
+                                    onKeyDown={(e) => e.key === "Enter" && commitHeight()}
+                                    className="h-8 text-xs"
+                                />
+                            </div>
                         </div>
                     </section>
 

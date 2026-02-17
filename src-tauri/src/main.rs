@@ -7,7 +7,7 @@ use commands::dir::{read_dir_chunked, create_folder, create_file, rename_item};
 use commands::copy::start_copy;
 use commands::move_op::start_move;
 use commands::batch::{delete_items, batch_copy, batch_move};
-use commands::thumbnails::get_thumbnail;
+use commands::thumbnails::{get_thumbnail, get_video_thumbnail};
 use commands::preview_op::{get_file_text_content, get_file_base64_content, get_file_blob, show_in_finder, open_item};
 use commands::operation::cancel_operation;
 use commands::search::{start_file_search, start_content_search};
@@ -110,6 +110,7 @@ fn main() {
             batch_copy,
             batch_move,
             get_thumbnail,
+            get_video_thumbnail,
             get_file_text_content,
             get_file_base64_content,
             get_file_blob,

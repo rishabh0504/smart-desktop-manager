@@ -48,6 +48,27 @@ else
     fi
 fi
 
+# 3b. ffmpeg (video thumbnails in grid)
+echo "STEP 2b: ffmpeg (video thumbnails)"
+
+export PATH="$PATH:/usr/local/bin:/opt/homebrew/bin"
+FFMPEG_BIN="$(command -v ffmpeg || true)"
+
+if [[ -x "$FFMPEG_BIN" ]]; then
+    echo "✅ ffmpeg found at: $FFMPEG_BIN"
+else
+    echo "⬇️ ffmpeg NOT found. Installing via Homebrew..."
+    if command -v brew >/dev/null 2>&1; then
+        if brew install ffmpeg; then
+            echo "✅ ffmpeg installed successfully"
+        else
+            echo "⚠️ ffmpeg install failed, continuing..."
+        fi
+    else
+        echo "⚠️ Homebrew not found — install manually: brew install ffmpeg"
+    fi
+fi
+
 # 4. Model Bootstrapping
 echo "STEP 3: AI Model Bootstrapping"
 
