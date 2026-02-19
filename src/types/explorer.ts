@@ -36,7 +36,7 @@ export interface PanelState {
 export interface Tab extends PanelState {
     id: string;
     title: string;
-    type: "explorer" | "duplicates" | "search"; // extensible
+    type: "explorer" | "duplicates" | "search" | "content_search" | "clean"; // extensible
 }
 
 export interface SearchResult {
@@ -66,11 +66,24 @@ export interface PreviewSettings {
     other: boolean;
 }
 
-export interface ExplorerSettings {
+export interface ConfigSection {
     preview_enabled: PreviewSettings;
     show_hidden_files: boolean;
     show_system_files: boolean;
     blocked_extensions: string[];
+}
+
+export interface ThemeSettings {
+    use_custom_color: boolean;
+    custom_color: string;
+}
+
+export interface AppSettings {
+    explorer: ConfigSection;
+    dedupe: ConfigSection;
+    content_search: ConfigSection;
+    clean: ConfigSection;
+    theme: ThemeSettings;
     setup_completed: boolean;
 }
 
@@ -79,4 +92,10 @@ export interface TreeNode {
     path: string;
     is_dir: boolean;
     has_children: boolean;
+}
+
+export interface EmptyFolder {
+    path: string;
+    name: string;
+    parent_path: string;
 }

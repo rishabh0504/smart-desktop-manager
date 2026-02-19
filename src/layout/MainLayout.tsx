@@ -15,11 +15,14 @@ import { cn } from "@/lib/utils";
 import { ListTray } from "@/components/ListTray";
 import { WelcomePage } from "@/components/WelcomePage";
 import { DuplicateTab } from "@/components/DuplicateTab";
+import { ContentTypeTab } from "@/components/ContentTypeTab";
 import { TabBar } from "@/components/TabBar";
 import { DeleteQueueModal } from "@/components/DeleteQueueModal";
 import { MoveQueueManagerModal } from "@/components/MoveQueueManagerModal";
 import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
 import { useMoveQueueStore } from "@/stores/moveQueueStore";
+import { ThemeApplier } from "@/components/ThemeApplier";
+import { CleanTab } from "@/components/CleanTab";
 
 export const MainLayout = () => {
     const tabs = useExplorerStore((state) => state.tabs);
@@ -87,15 +90,24 @@ export const MainLayout = () => {
                     e.preventDefault();
                     setActiveView("dedupe");
                     break;
+                case "3":
+                    e.preventDefault();
+                    setActiveView("content_search");
+                    break;
+                case "4":
+                    e.preventDefault();
+                    setActiveView("clean");
+                    break;
             }
         };
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [toggleSidebar, activeTabId, closeTab, addTab]);
+    }, [toggleSidebar, activeTabId, closeTab, addTab, setActiveView]);
 
     return (
         <div className="flex flex-col h-screen w-full bg-background overflow-hidden text-foreground">
+            <ThemeApplier />
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-2 bg-muted/20 border-b">
                 <div className="flex items-center gap-4">
@@ -223,7 +235,9 @@ export const MainLayout = () => {
                         </>
                     ) : (
                         <div className="flex-1 p-4 overflow-hidden bg-background">
-                            <DuplicateTab tabId="dedupe-service" />
+                            {activeView === "dedupe" && <DuplicateTab tabId="dedupe-service" />}
+                            {activeView === "content_search" && <ContentTypeTab tabId="content-search-service" />}
+                            {activeView === "clean" && <CleanTab tabId="clean" />}
                         </div>
                     )}
                 </div>

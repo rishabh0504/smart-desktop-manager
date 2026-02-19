@@ -23,6 +23,8 @@ interface DedupeStore {
     duplicates: DuplicateGroup[];
     selectedPaths: Set<string>;
     scanQueue: string[];
+    expandedGroups: Set<string>;
+    previewTarget: string | null;
 
     // Actions
     addToQueue: (path: string) => void;
@@ -30,6 +32,8 @@ interface DedupeStore {
     startScan: () => Promise<void>;
     resetScan: () => void;
     toggleSelection: (path: string) => void;
+    toggleGroup: (hash: string) => void;
+    setPreviewTarget: (path: string | null) => void;
     selectDuplicates: (strategy: "all-but-newest" | "all-but-oldest" | "none") => void;
     deleteSelected: () => Promise<void>;
 }
@@ -40,6 +44,8 @@ export const useDedupeStore = create<DedupeStore>((set, get) => ({
     duplicates: [],
     selectedPaths: new Set(),
     scanQueue: [],
+    expandedGroups: new Set(),
+    previewTarget: null,
 
     addToQueue: (path) => set(state => ({
         scanQueue: state.scanQueue.includes(path) ? state.scanQueue : [...state.scanQueue, path]
@@ -56,7 +62,15 @@ export const useDedupeStore = create<DedupeStore>((set, get) => ({
             return;
         }
 
-        set({ scanning: true, duplicates: [], progress: null, selectedPaths: new Set() });
+        set({
+            scanning: true,
+            duplicates: [],
+            progress: null,
+            selectedPaths: new Set(),
+            expandedGroups: new Set(),
+            previewTarget: null
+        });
+        // ... rest of startScan logic ...
 
         const DEDUPE_BATCH_MS = 150;
         const DEDUPE_BATCH_SIZE = 25;
@@ -85,7 +99,8 @@ export const useDedupeStore = create<DedupeStore>((set, get) => ({
         });
 
         try {
-            await invoke("find_duplicates", { paths: scanQueue });
+            const settings = (await import("./settingsStore")).useSettingsStore.getState().settings;
+            await invoke("find_duplicates", { paths: scanQueue, settings: settings.dedupe });
             flush();
             set({ scanning: false });
         } catch (error) {
@@ -99,7 +114,14 @@ export const useDedupeStore = create<DedupeStore>((set, get) => ({
         }
     },
 
-    resetScan: () => set({ scanning: false, duplicates: [], progress: null, selectedPaths: new Set() }),
+    resetScan: () => set({
+        scanning: false,
+        duplicates: [],
+        progress: null,
+        selectedPaths: new Set(),
+        expandedGroups: new Set(),
+        previewTarget: null
+    }),
 
     toggleSelection: (path) => {
         set(state => {
@@ -109,6 +131,17 @@ export const useDedupeStore = create<DedupeStore>((set, get) => ({
             return { selectedPaths: newSelection };
         });
     },
+
+    toggleGroup: (hash) => {
+        set(state => {
+            const newExpanded = new Set(state.expandedGroups);
+            if (newExpanded.has(hash)) newExpanded.delete(hash);
+            else newExpanded.add(hash);
+            return { expandedGroups: newExpanded };
+        });
+    },
+
+    setPreviewTarget: (path) => set({ previewTarget: path }),
 
     selectDuplicates: (strategy) => {
         const { duplicates } = get();

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { ExplorerSettings, PreviewSettings } from "@/types/explorer";
+import { AppSettings, ConfigSection, PreviewSettings } from "@/types/explorer";
 import { useExplorerStore } from "./explorerStore";
 
 const GRID_THUMB_WIDTH_KEY = "sdm-grid-thumb-width";
@@ -17,34 +17,46 @@ function getGridThumbFromStorage(): { width: number; height: number } {
     };
 }
 
+const DEFAULT_CONFIG: ConfigSection = {
+    preview_enabled: {
+        image: true,
+        video: true,
+        audio: true,
+        text: true,
+        pdf: true,
+        archive: false,
+        other: true,
+    },
+    show_hidden_files: false,
+    show_system_files: false,
+    blocked_extensions: ["iso", "tmp"],
+};
+
 interface SettingsState {
-    settings: ExplorerSettings;
+    settings: AppSettings;
     loading: boolean;
     grid_thumbnail_width: number;
     grid_thumbnail_height: number;
 
     loadSettings: () => Promise<void>;
-    updateSettings: (settings: Partial<ExplorerSettings>) => Promise<void>;
-    updatePreviewSettings: (preview: Partial<PreviewSettings>) => Promise<void>;
+    updateSettings: (section: "explorer" | "dedupe" | "content_search" | "clean", values: Partial<ConfigSection>) => Promise<void>;
+    updatePreviewSettings: (section: "explorer" | "dedupe" | "content_search" | "clean", preview: Partial<PreviewSettings>) => Promise<void>;
     updateGridThumbnailSize: (width: number, height: number) => void;
-    addBlockedExtension: (ext: string) => Promise<void>;
-    removeBlockedExtension: (ext: string) => Promise<void>;
+    addBlockedExtension: (section: "explorer" | "dedupe" | "content_search" | "clean", ext: string) => Promise<void>;
+    removeBlockedExtension: (section: "explorer" | "dedupe" | "content_search" | "clean", ext: string) => Promise<void>;
+    updateTheme: (values: Partial<AppSettings["theme"]>) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
     settings: {
-        preview_enabled: {
-            image: true,
-            video: true,
-            audio: true,
-            text: true,
-            pdf: true,
-            archive: false,
-            other: true,
+        explorer: { ...DEFAULT_CONFIG },
+        dedupe: { ...DEFAULT_CONFIG },
+        content_search: { ...DEFAULT_CONFIG },
+        clean: { ...DEFAULT_CONFIG },
+        theme: {
+            use_custom_color: false,
+            custom_color: "#3b82f6",
         },
-        show_hidden_files: false,
-        show_system_files: false,
-        blocked_extensions: ["iso", "tmp"],
         setup_completed: true,
     },
     loading: false,
@@ -54,7 +66,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     loadSettings: async () => {
         set({ loading: true });
         try {
-            const settings = await invoke<ExplorerSettings>("load_settings");
+            const settings = await invoke<AppSettings>("load_settings");
             const grid = getGridThumbFromStorage();
             set({ settings, loading: false, grid_thumbnail_width: grid.width, grid_thumbnail_height: grid.height });
         } catch (err) {
@@ -74,36 +86,59 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         set({ grid_thumbnail_width: w, grid_thumbnail_height: h });
     },
 
-    updateSettings: async (newSettings) => {
-        const updated = { ...get().settings, ...newSettings };
-        set({ settings: updated });
+    updateSettings: async (section, values) => {
+        const currentSection = get().settings[section];
+        const updatedSection = { ...currentSection, ...values };
+        const updatedSettings = { ...get().settings, [section]: updatedSection };
+
+        set({ settings: updatedSettings });
 
         try {
-            await invoke("save_settings", { settings: updated });
-            // Trigger refresh in explorer lanes
-            const explorer = useExplorerStore.getState();
-            explorer.refresh("left");
-            explorer.refresh("right");
+            await invoke("save_settings", { settings: updatedSettings });
+            if (section === "explorer") {
+                const explorer = useExplorerStore.getState();
+                explorer.refresh("left");
+                explorer.refresh("right");
+            }
         } catch (err) {
             console.error("Failed to save settings:", err);
         }
     },
 
-    updatePreviewSettings: async (preview) => {
-        const updatedPreview = { ...get().settings.preview_enabled, ...preview };
-        await get().updateSettings({ preview_enabled: updatedPreview });
+    updatePreviewSettings: async (section, preview) => {
+        const currentPreview = get().settings[section].preview_enabled;
+        const updatedPreview = { ...currentPreview, ...preview };
+        await get().updateSettings(section, { preview_enabled: updatedPreview });
     },
 
-    addBlockedExtension: async (ext) => {
+    addBlockedExtension: async (section, ext) => {
         const normalized = ext.toLowerCase().replace('.', '');
-        if (!get().settings.blocked_extensions.includes(normalized)) {
-            const updated = [...get().settings.blocked_extensions, normalized];
-            await get().updateSettings({ blocked_extensions: updated });
+        const currentExtensions = get().settings[section].blocked_extensions;
+        if (!currentExtensions.includes(normalized)) {
+            const updated = [...currentExtensions, normalized];
+            await get().updateSettings(section, { blocked_extensions: updated });
         }
     },
 
-    removeBlockedExtension: async (ext) => {
-        const updated = get().settings.blocked_extensions.filter(e => e !== ext);
-        await get().updateSettings({ blocked_extensions: updated });
+    removeBlockedExtension: async (section, ext) => {
+        const currentExtensions = get().settings[section].blocked_extensions;
+        const updated = currentExtensions.filter(e => e !== ext);
+        await get().updateSettings(section, { blocked_extensions: updated });
+    },
+
+    updateTheme: async (values) => {
+        const currentTheme = get().settings.theme;
+        const updatedTheme = { ...currentTheme, ...values };
+        const updatedSettings = { ...get().settings, theme: updatedTheme };
+
+        set({ settings: updatedSettings });
+
+        try {
+            await invoke("save_settings", { settings: updatedSettings });
+            // Apply theme logic will be handled in MainLayout or a hook
+        } catch (err) {
+            console.error("Failed to save settings:", err);
+        }
     }
-}));
+}
+));

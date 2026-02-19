@@ -33,13 +33,16 @@ pub struct ProgressEvent {
     pub elapsed_ms: u64,
 }
 
+use super::settings::ConfigSection;
+
 #[tauri::command]
 pub async fn find_duplicates<R: Runtime>(
     app: tauri::AppHandle<R>,
     paths: Vec<String>,
+    settings: ConfigSection,
 ) -> Result<Vec<DuplicateGroup>, String> {
     let start_time = Instant::now();
-
+    
     // Phase 0: Clean and Deduplicate Paths
     let mut unique_paths: Vec<PathBuf> = paths.into_iter()
         .map(PathBuf::from)
@@ -55,10 +58,6 @@ pub async fn find_duplicates<R: Runtime>(
     }
 
     // Determine disk type and parallelism
-    // Simple heuristic: External drives or specific mount points can be HDDs.
-    // For now, let's allow Rayon to be limited manually or via a quick check.
-    // Real Enterprise: check /sys/block/*/queue/rotational (Linux) or IOReg (Mac).
-    // Let's use 4 threads as a safe "Enterprise default" to avoid system-wide lag.
     let _ = rayon::ThreadPoolBuilder::new().num_threads(4).build_global();
 
     // Progress State
@@ -108,11 +107,12 @@ pub async fn find_duplicates<R: Runtime>(
         }
     });
 
-    // Phase 1: Discovery (ignore crate = respect .gitignore / .ignore, skip noisy dirs on 10TB)
+    // Phase 1: Discovery
     let mut files_by_identity: HashMap<(u64, u64, u64), Vec<PathBuf>> = HashMap::new();
     for start_path in &cleaned_paths {
         let mut walker = ignore::WalkBuilder::new(start_path);
         walker.follow_links(false);
+        // ignore::Walk respect .gitignore by default, we'll manually check hidden/system
         for result in walker.build() {
             if scanned_count.load(Ordering::Relaxed) >= MAX_DEDUPE_DISCOVERY_FILES {
                 break;
@@ -121,10 +121,42 @@ pub async fn find_duplicates<R: Runtime>(
                 Ok(e) => e,
                 Err(_) => continue,
             };
+            
             if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
                 continue;
             }
+
             let path = entry.path().to_path_buf();
+            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+
+            // Visibility filters
+            if !settings.show_hidden_files && name.starts_with('.') {
+                continue;
+            }
+            // For dedupe, we might stick to simple hidden check or reuse the system check from dir.rs
+            // Let's reuse name.starts_with('.') as a baseline for "hidden".
+
+            let extension = path.extension().map(|e| e.to_string_lossy().to_string().to_lowercase()).unwrap_or_default();
+            
+            // Blocked extensions filter
+            if settings.blocked_extensions.contains(&extension) {
+                continue;
+            }
+
+            // Preview Type filter (for dedupe, this acts as an inclusion filter)
+            let is_allowed = match extension.as_str() {
+                "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" => settings.preview_enabled.image,
+                "mp4" | "mkv" | "mov" | "avi" | "webm" => settings.preview_enabled.video,
+                "mp3" | "wav" | "ogg" | "flac" | "m4a" => settings.preview_enabled.audio,
+                "txt" | "md" | "js" | "ts" | "py" | "rs" | "json" => settings.preview_enabled.text,
+                "pdf" => settings.preview_enabled.pdf,
+                _ => settings.preview_enabled.other,
+            };
+
+            if !is_allowed {
+                continue;
+            }
+
             let metadata = match path.metadata() {
                 Ok(m) => m,
                 Err(_) => continue,

@@ -11,12 +11,14 @@ import { useDedupeStore } from "@/stores/dedupeStore";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useSidebarStore } from "@/stores/sidebarStore";
+import { useCleanStore } from "@/stores/cleanStore";
 import { TreeNode } from "@/types/explorer";
 import { invoke } from "@tauri-apps/api/core";
 import {
     ChevronRight,
     CopyCheck,
     Download,
+    FileSearch,
     Files,
     Film,
     FolderHeart,
@@ -26,9 +28,9 @@ import {
     LayoutGrid,
     Monitor,
     Music,
-    Settings2,
     Star,
-    Usb
+    Usb,
+    Eraser
 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -45,7 +47,7 @@ export const Sidebar = () => {
     useEffect(() => {
         refreshVolumes();
         homeDir().then(setHomePath);
-    }, [refreshVolumes, settings.show_system_files]);
+    }, [refreshVolumes, settings.explorer.show_system_files]);
 
     if (isCollapsed) return null;
 
@@ -55,32 +57,7 @@ export const Sidebar = () => {
 
     return (
         <div className="w-64 h-full bg-muted/10 border-r flex flex-col transition-all duration-300 ease-in-out select-none">
-            <div className="p-3 space-y-1 border-b bg-muted/5">
-                <Button
-                    variant={activeView === "explorer" ? "secondary" : "ghost"}
-                    size="sm"
-                    className={cn(
-                        "w-full justify-start gap-2 text-xs h-9 transition-all",
-                        activeView === "explorer" && "font-bold text-primary shadow-sm"
-                    )}
-                    onClick={() => setActiveView("explorer")}
-                >
-                    <LayoutGrid className="w-4 h-4" />
-                    File Explorer
-                </Button>
-                <Button
-                    variant={activeView === "dedupe" ? "secondary" : "ghost"}
-                    size="sm"
-                    className={cn(
-                        "w-full justify-start gap-2 text-xs h-9 transition-all",
-                        activeView === "dedupe" && "font-bold text-primary shadow-sm"
-                    )}
-                    onClick={() => setActiveView("dedupe")}
-                >
-                    <CopyCheck className="w-4 h-4" />
-                    Duplicate Finder
-                </Button>
-            </div>
+            {/* Top section now only contains generic layout padding or empty if all views are footer-based */}
 
             <ScrollArea className="flex-1">
                 <div className="p-3 space-y-6">
@@ -174,10 +151,54 @@ export const Sidebar = () => {
                 </div>
             </ScrollArea>
 
-            <div className="p-3 border-t bg-muted/10">
-                <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-muted-foreground text-xs h-8">
-                    <Settings2 className="w-3.5 h-3.5" />
-                    Preferences
+            <div className="p-3 border-t bg-muted/10 space-y-1">
+                <Button
+                    variant={activeView === "explorer" ? "secondary" : "ghost"}
+                    size="sm"
+                    className={cn(
+                        "w-full justify-start gap-2 text-xs h-9 transition-all",
+                        activeView === "explorer" && "font-bold text-primary shadow-sm"
+                    )}
+                    onClick={() => setActiveView("explorer")}
+                >
+                    <LayoutGrid className="w-4 h-4" />
+                    Explorer
+                </Button>
+                <Button
+                    variant={activeView === "dedupe" ? "secondary" : "ghost"}
+                    size="sm"
+                    className={cn(
+                        "w-full justify-start gap-2 text-xs h-9 transition-all",
+                        activeView === "dedupe" && "font-bold text-primary shadow-sm"
+                    )}
+                    onClick={() => setActiveView("dedupe")}
+                >
+                    <CopyCheck className="w-4 h-4" />
+                    Duplicate Finder
+                </Button>
+                <Button
+                    variant={activeView === "content_search" ? "secondary" : "ghost"}
+                    size="sm"
+                    className={cn(
+                        "w-full justify-start gap-2 text-xs h-9 transition-all",
+                        activeView === "content_search" && "font-bold text-primary shadow-sm"
+                    )}
+                    onClick={() => setActiveView("content_search")}
+                >
+                    <FileSearch className="w-4 h-4" />
+                    Content Search
+                </Button>
+                <Button
+                    variant={activeView === "clean" ? "secondary" : "ghost"}
+                    size="sm"
+                    className={cn(
+                        "w-full justify-start gap-2 text-xs h-9 transition-all",
+                        activeView === "clean" && "font-bold text-primary shadow-sm"
+                    )}
+                    onClick={() => setActiveView("clean")}
+                >
+                    <Eraser className="w-4 h-4" />
+                    Clean View
                 </Button>
             </div>
         </div>
@@ -256,6 +277,7 @@ const TreeItem = ({ node, depth, icon, subLabel }: TreeItemProps) => {
     };
 
     const addToDedupe = useDedupeStore(state => state.addToQueue);
+    const addToClean = useCleanStore(state => state.addToQueue);
     const setActiveView = useExplorerStore(state => state.setActiveView);
 
     const handleAddToDedupe = (e: React.MouseEvent) => {
@@ -334,6 +356,15 @@ const TreeItem = ({ node, depth, icon, subLabel }: TreeItemProps) => {
                 <ContextMenuItem onClick={handleAddToDedupe}>
                     <CopyCheck className="w-4 h-4 mr-2" />
                     Find Duplicates
+                </ContextMenuItem>
+                <ContextMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    addToClean(node.path);
+                    toast.success("Added to Clean View queue");
+                    setActiveView("clean");
+                }}>
+                    <Eraser className="w-4 h-4 mr-2" />
+                    Clean Empty Folders
                 </ContextMenuItem>
             </ContextMenuContent>
         </ContextMenu>

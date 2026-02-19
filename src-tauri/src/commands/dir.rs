@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
-use super::settings::ExplorerSettings;
+use super::settings::ConfigSection;
 
 /// Max directory entries to load in one request to avoid OOM on huge dirs (e.g. 10TB volumes).
 const MAX_DIR_ENTRIES: usize = 500_000;
@@ -33,7 +33,7 @@ pub async fn read_dir_chunked(
     limit: usize,
     sort_by: String,
     order: String,
-    settings: ExplorerSettings,
+    settings: ConfigSection,
 ) -> Result<DirectoryResponse, String> {
     let dir_path = Path::new(&path);
     if !dir_path.exists() || !dir_path.is_dir() {

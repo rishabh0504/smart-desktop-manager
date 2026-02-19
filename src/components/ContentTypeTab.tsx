@@ -1,18 +1,15 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useDedupeStore } from "@/stores/dedupeStore";
+import { useContentTypeStore } from "@/stores/contentTypeStore";
 import { Button } from "@/components/ui/button";
 import { Progress } from "./ui/progress";
 import { Checkbox } from "./ui/checkbox";
 import {
     Search,
-    Trash2,
     RefreshCcw,
     AlertTriangle,
     FileText,
-    CheckSquare,
-    Square,
     ChevronRight,
     Loader2,
     Clock,
@@ -22,7 +19,13 @@ import {
     ListMinus as ListMinusIcon,
     FolderInput as FolderInputIcon,
     X,
-    CopyCheck
+    FileSearch,
+    Video,
+    Image as ImageIcon,
+    Music,
+    Archive,
+    Trash2,
+    LayoutGrid
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -38,28 +41,27 @@ import {
 } from "@/components/ui/select";
 import { FilePreviewContent } from "./FilePreviewContent";
 
-interface DuplicateTabProps {
+interface ContentTypeTabProps {
     tabId: string;
 }
 
-export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
+export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
     const scrollRef = useRef<HTMLDivElement>(null);
-    const scanning = useDedupeStore((state) => state.scanning);
-    const progress = useDedupeStore((state) => state.progress);
-    const duplicates = useDedupeStore((state) => state.duplicates);
-    const selectedPaths = useDedupeStore((state) => state.selectedPaths);
-    const scanQueue = useDedupeStore((state) => state.scanQueue);
-    const expandedGroups = useDedupeStore((state) => state.expandedGroups);
-    const previewTarget = useDedupeStore((state) => state.previewTarget);
+    const scanning = useContentTypeStore((state) => state.scanning);
+    const progress = useContentTypeStore((state) => state.progress);
+    const groups = useContentTypeStore((state) => state.groups);
+    const scanQueue = useContentTypeStore((state) => state.scanQueue);
+    const expandedCategories = useContentTypeStore((state) => state.expandedCategories);
 
-    const startScan = useDedupeStore((state) => state.startScan);
-    const resetScan = useDedupeStore((state) => state.resetScan);
-    const removeFromQueue = useDedupeStore((state) => state.removeFromQueue);
-    const toggleSelection = useDedupeStore((state) => state.toggleSelection);
-    const toggleGroup = useDedupeStore((state) => state.toggleGroup);
-    const setPreviewTarget = useDedupeStore((state) => state.setPreviewTarget);
-    const selectDuplicates = useDedupeStore((state) => state.selectDuplicates);
-    const deleteSelected = useDedupeStore((state) => state.deleteSelected);
+    // Local selection state for bulk actions
+    const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+    const [previewTarget, setPreviewTarget] = useState<string | null>(null);
+
+    const startScan = useContentTypeStore((state) => state.startScan);
+    const reset = useContentTypeStore((state) => state.reset);
+    const addToQueue = useContentTypeStore((state) => state.addToQueue);
+    const removeFromQueue = useContentTypeStore((state) => state.removeFromQueue);
+    const toggleCategory = useContentTypeStore((state) => state.toggleCategory);
 
     const deleteQueue = useDeleteQueueStore((state) => state.queue);
     const addToDeleteQueue = useDeleteQueueStore((state) => state.addToQueue);
@@ -77,6 +79,15 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
         else if (!selectedMoveQueueId || !moveQueues.some((q) => q.id === selectedMoveQueueId))
             setSelectedMoveQueueId(moveQueues[0].id);
     }, [moveQueues, selectedMoveQueueId]);
+
+    const toggleSelection = useCallback((path: string) => {
+        setSelectedPaths(prev => {
+            const next = new Set(prev);
+            if (next.has(path)) next.delete(path);
+            else next.add(path);
+            return next;
+        });
+    }, []);
 
     const handleAddToDeleteQueue = useCallback((path: string) => {
         const name = path.split(/[/\\]/).pop() || "File";
@@ -152,17 +163,6 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
         toast.success(`Added ${selectedPaths.size} files to move queue`);
     }, [selectedPaths, selectedMoveQueueId, addToMoveQueue]);
 
-    const formatSize = (bytes: number) => {
-        const units = ["B", "KB", "MB", "GB", "TB"];
-        let size = bytes;
-        let unitIndex = 0;
-        while (size >= 1024 && unitIndex < units.length - 1) {
-            size /= 1024;
-            unitIndex++;
-        }
-        return `${size.toFixed(1)} ${units[unitIndex]}`;
-    };
-
     const formatDuration = (ms: number) => {
         if (ms < 1000) return `${ms}ms`;
         const seconds = Math.floor(ms / 1000);
@@ -172,12 +172,23 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
         return `${minutes}m ${remainingSeconds}s`;
     };
 
+    const getCategoryIcon = (category: string) => {
+        switch (category.toLowerCase()) {
+            case "images": return <ImageIcon className="w-4 h-4 text-pink-500" />;
+            case "videos": return <Video className="w-4 h-4 text-red-500" />;
+            case "audio": return <Music className="w-4 h-4 text-purple-500" />;
+            case "documents": return <FileText className="w-4 h-4 text-blue-500" />;
+            case "archives": return <Archive className="w-4 h-4 text-orange-500" />;
+            default: return <FileSearch className="w-4 h-4 text-primary" />;
+        }
+    };
+
     const virtualizer = useVirtualizer({
-        count: duplicates.length,
+        count: groups.length,
         getScrollElement: () => scrollRef.current,
         estimateSize: (index) => {
-            const group = duplicates[index];
-            if (group && expandedGroups.has(String(group.hash))) {
+            const group = groups[index];
+            if (group && expandedCategories.has(String(group.category))) {
                 return 60 + (group.paths.length * 40) + 12;
             }
             return 68;
@@ -187,7 +198,7 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
 
     useEffect(() => {
         virtualizer.measure();
-    }, [duplicates, expandedGroups, previewTarget, virtualizer]);
+    }, [groups, expandedCategories, previewTarget, virtualizer]);
 
     return (
         <div className="flex h-full bg-background border rounded-md overflow-hidden transition-colors">
@@ -195,18 +206,18 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                 <div className="bg-muted/50 p-6 border-b">
                     <div className="flex items-center justify-between mb-6">
                         <div>
-                            <h2 className="text-2xl font-bold tracking-tight text-foreground">Duplicate Finder</h2>
+                            <h2 className="text-2xl font-bold tracking-tight text-foreground">Content Search</h2>
                             <p className="text-sm text-muted-foreground mt-1">
-                                Find and remove duplicate files across your open folders.
+                                Search and manage files grouped by category across your folders.
                             </p>
                         </div>
                         <div className="flex items-center gap-2">
-                            {duplicates.length > 0 && !scanning && (
+                            {groups.length > 0 && !scanning && (
                                 <div className="flex items-center gap-2">
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        className="h-9 px-4 rotate-x-180"
+                                        className="h-9 px-4"
                                         onClick={() => startScan()}
                                         title="Refresh Scan"
                                     >
@@ -217,10 +228,14 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                         variant="outline"
                                         size="sm"
                                         className="h-9 px-4"
-                                        onClick={() => resetScan()}
+                                        onClick={() => {
+                                            reset();
+                                            setSelectedPaths(new Set());
+                                            setPreviewTarget(null);
+                                        }}
                                     >
                                         <RefreshCcw className="w-4 h-4 mr-2" />
-                                        New Scan
+                                        New Search
                                     </Button>
                                 </div>
                             )}
@@ -230,14 +245,14 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                 onClick={() => startScan()}
                             >
                                 {scanning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Search className="w-4 h-4 mr-2" />}
-                                {scanning ? "Scanning..." : "Start Scan"}
+                                {scanning ? "Searching..." : "Start Search"}
                             </Button>
                         </div>
                     </div>
 
                     <div className="space-y-3">
                         <div className="flex items-center justify-between">
-                            <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Included Folders</h3>
+                            <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Folders to Scan</h3>
                             <Button
                                 variant="ghost"
                                 size="sm"
@@ -250,14 +265,10 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                             title: "Select Folders to Scan"
                                         });
                                         if (selected) {
-                                            // Handle both single string and array of strings/objects
                                             const items = Array.isArray(selected) ? selected : [selected];
-                                            const paths = items.map(item => {
-                                                if (typeof item === 'string') return item;
-                                                return (item as any).path || String(item);
-                                            });
+                                            const paths = items.map(item => typeof item === 'string' ? item : (item as any).path);
                                             paths.forEach(p => {
-                                                if (p) useDedupeStore.getState().addToQueue(p);
+                                                if (p) addToQueue(p);
                                             });
                                         }
                                     } catch (err) {
@@ -287,7 +298,7 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                             {scanQueue.length === 0 && (
                                 <div className="flex items-center gap-2 text-destructive text-xs font-medium bg-destructive/10 px-3 py-1.5 rounded-lg border border-destructive/20 animate-pulse">
                                     <AlertTriangle className="w-3 h-3" />
-                                    Add at least one folder to start scanning.
+                                    Add at least one folder and then hit Start Search.
                                 </div>
                             )}
                         </div>
@@ -303,36 +314,24 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                             </div>
                             <div className="text-right">
                                 <div className="text-2xl font-bold tracking-tighter text-foreground">{progress.scanned}</div>
-                                <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Files Reviewed</div>
+                                <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Files Found</div>
                             </div>
                         </div>
-                        <div className="relative h-1.5 w-full bg-secondary rounded-full overflow-hidden text-foreground">
-                            {progress.status.includes("Discovery") ? (
-                                <div className="absolute inset-0 bg-primary animate-progress-indeterminate origin-left w-1/3" />
-                            ) : (
-                                <Progress
-                                    value={(() => {
-                                        const match = progress.status.match(/\((\d+)%\)/);
-                                        return match ? parseInt(match[1]) : 0;
-                                    })()}
-                                    className="h-full"
-                                />
-                            )}
-                        </div>
+                        <Progress value={0} className="h-1.5" />
                         <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-muted-foreground/40">
                             <div className="flex items-center gap-4">
-                                <span>{progress.status.includes("Discovery") ? "Walking directory tree..." : "Analyzing matching files..."}</span>
+                                <span>Scanning directory trees...</span>
                                 <span className="flex items-center gap-1.5 text-primary/60">
                                     <Clock className="w-3 h-3" />
                                     {formatDuration(progress.elapsed_ms)}
                                 </span>
                             </div>
-                            <span>{duplicates.length} groups found</span>
+                            <span>{groups.length} categories active</span>
                         </div>
                     </div>
                 )}
 
-                {!scanning && duplicates.length > 0 && (
+                {!scanning && groups.length > 0 && (
                     <div className="flex-1 flex flex-col overflow-hidden text-foreground">
                         <div className="bg-muted/30 px-6 py-3 border-b flex items-center justify-between">
                             <div className="flex items-center gap-4">
@@ -344,37 +343,25 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                     </span>
                                 </div>
                                 <div className="h-8 w-[1px] bg-border mx-2" />
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 text-xs font-bold gap-2 hover:bg-primary/10 hover:text-primary transition-colors"
-                                    onClick={() => selectDuplicates("all-but-newest")}
-                                >
-                                    <CheckSquare className="w-4 h-4" />
-                                    Select All But One
-                                </Button>
+                                <span className="text-xs font-bold text-muted-foreground">
+                                    {selectedPaths.size} items selected
+                                </span>
                                 <Button
                                     variant="ghost"
                                     size="sm"
                                     className="h-8 text-xs font-bold gap-2 text-muted-foreground hover:bg-primary/5 transition-colors"
-                                    onClick={() => selectDuplicates("none")}
+                                    onClick={() => setSelectedPaths(new Set())}
                                 >
-                                    <Square className="w-4 h-4" />
                                     Deselect All
                                 </Button>
                             </div>
                             <div className="flex items-center gap-4">
-                                <span className="text-xs font-bold text-muted-foreground">
-                                    {selectedPaths.size} selected
-                                </span>
-                                <div className="h-6 w-[1px] bg-border mx-1" />
                                 <Button
                                     variant="outline"
                                     size="sm"
                                     className="h-8 font-bold text-destructive hover:bg-destructive/10"
                                     disabled={selectedPaths.size === 0}
                                     onClick={bulkAddToDeleteQueue}
-                                    title="Add selected to delete queue"
                                 >
                                     <ListPlusIcon className="w-3.5 h-3.5 mr-1" />
                                     Queue Delete
@@ -400,25 +387,12 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                             className="h-8 font-bold text-primary hover:bg-primary/10"
                                             disabled={selectedPaths.size === 0 || !selectedMoveQueueId}
                                             onClick={bulkAddToMoveQueue}
-                                            title="Add selected to move queue"
                                         >
                                             <FolderInputIcon className="w-3.5 h-3.5 mr-1" />
                                             Queue Move
                                         </Button>
                                     </>
                                 )}
-
-                                <div className="h-6 w-[1px] bg-border mx-1" />
-                                <Button
-                                    variant="destructive"
-                                    size="sm"
-                                    className="h-8 font-bold shadow-lg shadow-destructive/20"
-                                    disabled={selectedPaths.size === 0}
-                                    onClick={deleteSelected}
-                                >
-                                    <Trash2 className="w-3.5 h-3.5 mr-2" />
-                                    Clean Files
-                                </Button>
                             </div>
                         </div>
 
@@ -428,13 +402,13 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                 className="w-full"
                             >
                                 {virtualizer.getVirtualItems().map((virtualRow) => {
-                                    const group = duplicates[virtualRow.index];
+                                    const group = groups[virtualRow.index];
                                     if (!group) return null;
-                                    const isExpanded = expandedGroups.has(String(group.hash));
+                                    const isExpanded = expandedCategories.has(String(group.category));
 
                                     return (
                                         <div
-                                            key={String(group.hash)}
+                                            key={String(group.category)}
                                             data-index={virtualRow.index}
                                             ref={virtualizer.measureElement}
                                             className="absolute top-0 left-0 w-full px-6 py-1.5"
@@ -445,7 +419,7 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                             <div className="bg-muted/10 border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                                                 <div
                                                     className="bg-muted/30 px-4 py-3 border-b flex justify-between items-center cursor-pointer hover:bg-muted/40 transition-colors"
-                                                    onClick={() => toggleGroup(String(group.hash))}
+                                                    onClick={() => toggleCategory(String(group.category))}
                                                 >
                                                     <div className="flex items-center gap-3">
                                                         <ChevronRight className={cn(
@@ -453,19 +427,16 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                                             isExpanded && "rotate-90"
                                                         )} />
                                                         <div className="p-1.5 bg-background rounded-md border shadow-sm">
-                                                            <FileText className="w-4 h-4 text-primary" />
+                                                            {getCategoryIcon(String(group.category))}
                                                         </div>
                                                         <div>
-                                                            <div className="text-xs font-bold truncate max-w-[300px]">
-                                                                {group.paths[0].split(/[/\\]/).pop()}
+                                                            <div className="text-xs font-bold truncate">
+                                                                {group.category}
                                                             </div>
                                                             <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                                                                {formatSize(group.size)} • {group.paths.length} Copies
+                                                                {group.paths.length} Files found
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                    <div className="text-[10px] font-mono text-muted-foreground/30 uppercase">
-                                                        Hash: {String(group.hash).slice(0, 8)}...
                                                     </div>
                                                 </div>
 
@@ -476,26 +447,18 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                                                 key={path}
                                                                 className={cn(
                                                                     "flex items-center gap-3 px-3 py-2 rounded-lg transition-all cursor-pointer group",
-                                                                    selectedPaths.has(path) ? "bg-destructive/5 hover:bg-destructive/10" : "hover:bg-accent",
+                                                                    selectedPaths.has(path) ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-accent",
                                                                     previewTarget === path && "ring-2 ring-primary ring-inset bg-primary/5"
                                                                 )}
                                                                 onClick={() => setPreviewTarget(path)}
                                                             >
                                                                 <Checkbox
                                                                     checked={selectedPaths.has(path)}
-                                                                    onCheckedChange={(checked: boolean | "indeterminate") => {
-                                                                        if (typeof checked === "boolean") {
-                                                                            toggleSelection(path);
-                                                                        }
-                                                                    }}
+                                                                    onCheckedChange={() => toggleSelection(path)}
                                                                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                                                                    className="data-[state=checked]:bg-destructive data-[state=checked]:border-destructive"
                                                                 />
                                                                 <div className="flex-1 min-w-0">
                                                                     <div className="text-xs font-medium truncate group-hover:underline lowercase opacity-80 group-hover:opacity-100">{path}</div>
-                                                                </div>
-                                                                <div className="text-[10px] font-bold text-muted-foreground/40 uppercase group-hover:text-primary transition-colors">
-                                                                    {path.match(/[/\\]Users[/\\]/i) ? "User Space" : "System"}
                                                                 </div>
                                                             </div>
                                                         ))}
@@ -510,14 +473,14 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                     </div>
                 )}
 
-                {!scanning && duplicates.length === 0 && (
+                {!scanning && groups.length === 0 && (
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-12 opacity-50 grayscale hover:grayscale-0 transition-all duration-500">
                         <div className="w-24 h-24 bg-muted rounded-full flex items-center justify-center mb-6">
-                            <CopyCheck className="w-12 h-12 text-muted-foreground" />
+                            <LayoutGrid className="w-12 h-12 text-muted-foreground" />
                         </div>
-                        <h3 className="text-lg font-bold mb-2 text-foreground">Ready to Scan</h3>
+                        <h3 className="text-lg font-bold mb-2 text-foreground">Find Content by Type</h3>
                         <p className="text-sm text-muted-foreground max-w-xs leading-relaxed">
-                            Select folders from the sidebar to start finding identical files and freeing up storage space.
+                            Organize your files by scanning for specific types like Videos, Images, or Archives.
                         </p>
                     </div>
                 )}
@@ -546,7 +509,7 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                             path={previewTarget}
                             extension={previewTarget.split('.').pop() || ""}
                             name={previewTarget.split(/[/\\]/).pop() || ""}
-                            section="dedupe"
+                            section="content_search"
                             className="max-h-full"
                         />
                     </div>

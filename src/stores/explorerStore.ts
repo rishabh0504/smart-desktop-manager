@@ -5,13 +5,13 @@ import { DirectoryResponse, SortField, SortOrder, Tab } from "@/types/explorer";
 interface ExplorerStore {
     tabs: Tab[];
     activeTabId: string | null;
-    activeView: "explorer" | "dedupe";
+    activeView: "explorer" | "dedupe" | "content_search" | "clean";
 
     // Actions
     addTab: (path?: string, type?: Tab["type"]) => void;
     closeTab: (id: string) => void;
     setActiveTab: (id: string) => void;
-    setActiveView: (view: "explorer" | "dedupe") => void;
+    setActiveView: (view: "explorer" | "dedupe" | "content_search" | "clean") => void;
 
     // Per-Tab Actions (require tabId)
     setPath: (tabId: string, path: string, updateHistory?: boolean, force?: boolean) => Promise<void>;
@@ -159,8 +159,8 @@ export const useExplorerStore = create<ExplorerStore>((set, get) => ({
 
         try {
             console.log("Fetching path:", path);
-            const settings = (await import("./settingsStore")).useSettingsStore.getState().settings;
-            console.log("Using settings:", settings);
+            const appSettings = (await import("./settingsStore")).useSettingsStore.getState().settings;
+            console.log("Using explorer settings:", appSettings.explorer);
 
             const response: DirectoryResponse = await invoke("read_dir_chunked", {
                 path,
@@ -168,7 +168,7 @@ export const useExplorerStore = create<ExplorerStore>((set, get) => ({
                 limit: 1000,
                 sortBy: tab.sortBy,
                 order: tab.order,
-                settings,
+                settings: appSettings.explorer,
             });
             console.log("Response:", response);
 
@@ -211,14 +211,14 @@ export const useExplorerStore = create<ExplorerStore>((set, get) => ({
         }));
 
         try {
-            const settings = (await import("./settingsStore")).useSettingsStore.getState().settings;
+            const appSettings = (await import("./settingsStore")).useSettingsStore.getState().settings;
             const response: DirectoryResponse = await invoke("read_dir_chunked", {
                 path: tab.path,
                 offset: tab.entries.length,
                 limit: 1000,
                 sortBy: tab.sortBy,
                 order: tab.order,
-                settings,
+                settings: appSettings.explorer,
             });
 
             set(state => ({

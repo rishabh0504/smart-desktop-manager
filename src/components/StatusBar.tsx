@@ -87,10 +87,10 @@ export const StatusBar = () => {
                     variant="ghost"
                     size="sm"
                     className="h-4 px-1.5 flex items-center gap-1 hover:bg-muted font-bold text-[9px] uppercase tracking-tighter"
-                    onClick={() => updateSettings({ show_system_files: !settings.show_system_files })}
+                    onClick={() => updateSettings("explorer", { show_system_files: !settings.explorer.show_system_files })}
                 >
-                    {settings.show_system_files ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3 opacity-50" />}
-                    {settings.show_system_files ? "System Shown" : "System Hidden"}
+                    {settings.explorer.show_system_files ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3 opacity-50" />}
+                    {settings.explorer.show_system_files ? "System Shown" : "System Hidden"}
                 </Button>
 
                 <div className="flex items-center gap-1.5 min-w-[100px] justify-end">

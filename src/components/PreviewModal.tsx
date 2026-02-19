@@ -3,9 +3,9 @@ import { usePreviewStore } from "@/stores/previewStore";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
 import { useMoveQueueStore } from "@/stores/moveQueueStore";
-import { FileText, Image as ImageIcon, Video, Music, FileQuestion, ChevronLeft, ChevronRight, Loader2, FolderOpen, Maximize2, Minimize2, ListPlus, ListMinus, FolderInput } from "lucide-react";
+import { FileText, Image as ImageIcon, Video, Music, FileQuestion, ChevronLeft, ChevronRight, FolderOpen, Maximize2, Minimize2, ListPlus, ListMinus, FolderInput } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -18,28 +18,7 @@ import {
 } from "@/components/ui/select";
 import { isVideoExtension } from "@/lib/fileTypes";
 
-function VideoPreview({ src, className }: { src: string; className?: string }) {
-    const videoRef = useRef<HTMLVideoElement>(null);
-    useEffect(() => {
-        const el = videoRef.current;
-        if (!el) return;
-        el.muted = true;
-        const onPlay = () => { el.muted = true; };
-        el.addEventListener("play", onPlay);
-        return () => el.removeEventListener("play", onPlay);
-    }, [src]);
-    return (
-        <video
-            ref={videoRef}
-            controls
-            src={src}
-            className={className}
-            autoPlay
-            muted
-            playsInline
-        />
-    );
-}
+import { FilePreviewContent } from "./FilePreviewContent";
 
 export const PreviewModal = () => {
     const target = usePreviewStore((state) => state.target);
@@ -67,9 +46,6 @@ export const PreviewModal = () => {
     const activeTab = tabs.find(t => t.id === activeTabId);
     const currentEntries = activeTab?.type === "explorer" ? activeTab.entries : [];
 
-    const [content, setContent] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [previewError, setPreviewError] = useState<string | null>(null);
     const [isTheatrical, setIsTheatrical] = useState(false);
 
     // Reset theatrical mode when closed
@@ -164,42 +140,6 @@ export const PreviewModal = () => {
     const isPdf = ext === "pdf";
 
     useEffect(() => {
-        if (!target || !isOpen) {
-            setContent(null);
-            setPreviewError(null);
-            return;
-        }
-
-        setLoading(true);
-        setPreviewError(null);
-
-        if (isText) {
-            invoke<string>("get_file_text_content", { path: target.path })
-                .then((c) => { setContent(c); setPreviewError(null); })
-                .catch((err: unknown) => {
-                    const msg = typeof err === "string" ? err : (err as Error)?.message ?? "Failed to load file";
-                    setPreviewError(msg);
-                    setContent(null);
-                })
-                .finally(() => setLoading(false));
-        } else if (isPdf) {
-            invoke<string>("get_file_base64_content", { path: target.path })
-                .then((c) => { setContent(c); setPreviewError(null); })
-                .catch((err: unknown) => {
-                    const msg = typeof err === "string" ? err : (err as Error)?.message ?? "Failed to load file";
-                    setPreviewError(msg);
-                    setContent(null);
-                })
-                .finally(() => setLoading(false));
-        } else if (isImage || isVideo || isAudio) {
-            setContent(`vmedia://localhost/${encodeURIComponent(target.path)}`);
-            setLoading(false);
-        } else {
-            setLoading(false);
-        }
-    }, [target, isOpen, isText, isPdf, isImage, isVideo, isAudio]);
-
-    useEffect(() => {
         if (!isOpen) return;
 
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -207,7 +147,7 @@ export const PreviewModal = () => {
                 handleNext();
             } else if (e.key === "ArrowLeft") {
                 handlePrev();
-            } else             if (e.key === "Delete" || ((e.metaKey || e.ctrlKey) && e.key === "Backspace")) {
+            } else if (e.key === "Delete" || ((e.metaKey || e.ctrlKey) && e.key === "Backspace")) {
                 e.preventDefault();
                 handleAddToDeleteQueue();
             } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "o") {
@@ -221,21 +161,15 @@ export const PreviewModal = () => {
             } else if (e.key === "Escape") {
                 if (isTheatrical) {
                     setIsTheatrical(false);
-                    // Prevent closing dialog if getting out of theatrical mode? 
-                    // Standard behavior is usually Esc closes fullscreen, then Esc closes modal.
-                    // But here Dialog handles Esc. We might need to stop propagation if we want to catch it.
-                    // However, let's keep it simple: Esc always closes modal for now, unless we want to trap it.
                 }
             }
         };
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [isOpen, handleNext, handlePrev, handleAddToDeleteQueue, isTheatrical]);
+    }, [isOpen, handleNext, handlePrev, handleAddToDeleteQueue, isTheatrical, handleOpenWithApp]);
 
     if (!target) return null;
-
-    const mediaSrc = content || null;
 
     return (
         <Dialog open={isOpen} onOpenChange={closePreview}>
@@ -275,66 +209,12 @@ export const PreviewModal = () => {
                 </DialogHeader>
 
                 <div className="flex-1 overflow-auto relative group flex items-center justify-center bg-black/5 dark:bg-white/5 p-4 data-[theatrical=true]:bg-black data-[theatrical=true]:p-0" data-theatrical={isTheatrical}>
-                    {previewError && (
-                        <div className="flex flex-col items-center justify-center gap-4 p-8 text-center max-w-md">
-                            <FileQuestion className="w-12 h-12 text-amber-500" />
-                            <p className="text-sm font-medium text-muted-foreground">{previewError}</p>
-                            <p className="text-xs text-muted-foreground/80">Use &quot;Open with App&quot; below to open this file.</p>
-                        </div>
-                    )}
-                    {loading && !previewError && (
-                        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm transition-all duration-300">
-                            <div className="flex items-center gap-3 text-primary animate-pulse font-medium bg-background/80 px-6 py-3 rounded-full shadow-lg border">
-                                <Loader2 className="w-5 h-5 animate-spin" />
-                                <span>Streaming Content...</span>
-                            </div>
-                        </div>
-                    )}
-                    {isImage && mediaSrc && !previewError && (
-                        <img
-                            src={mediaSrc}
-                            alt={target.name}
-                            className="max-w-full max-h-full object-contain shadow-2xl rounded-sm"
-                            loading="lazy"
-                        />
-                    )}
-
-                    {isVideo && mediaSrc && !previewError && (
-                        <VideoPreview src={mediaSrc} className="w-full h-full object-contain shadow-2xl rounded-sm" />
-                    )}
-
-                    {isAudio && !previewError && (
-                        <div className="flex flex-col items-center gap-6">
-                            <div className="w-32 h-32 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
-                                <Music className="w-16 h-16 text-primary/50" />
-                            </div>
-                            <audio controls src={mediaSrc || undefined} className="w-80 shadow-lg" autoPlay muted />
-                        </div>
-                    )}
-
-                    {isText && content && !previewError && (
-                        <div className="w-full h-full p-6 font-mono text-xs bg-muted/20 border rounded-lg whitespace-pre overflow-auto select-text scrollbar-thin scrollbar-thumb-muted-foreground/20">
-                            {content}
-                        </div>
-                    )}
-
-                    {isPdf && content && !previewError && (
-                        <embed
-                            src={content}
-                            type="application/pdf"
-                            className="w-full h-full rounded-sm shadow-xl"
-                        />
-                    )}
-
-                    {!isImage && !isVideo && !isAudio && !isText && !isPdf && !loading && !previewError && (
-                        <div className="flex flex-col items-center gap-4 text-muted-foreground bg-muted/20 p-8 rounded-xl border border-dashed">
-                            <FileQuestion className="w-16 h-16 opacity-50" />
-                            <div className="text-center">
-                                <p className="text-sm font-medium">No preview available for this file type.</p>
-                                <p className="text-xs opacity-70 mt-1 max-w-[300px] truncate">{target.path}</p>
-                            </div>
-                        </div>
-                    )}
+                    <FilePreviewContent
+                        path={target.path}
+                        extension={target.extension || ""}
+                        name={target.name}
+                        section="explorer"
+                    />
                 </div>
 
                 <div className="p-3 border-t bg-muted/30 flex justify-between items-center px-6">

@@ -118,7 +118,7 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
                     return;
                 }
 
-                const enabled = settings.preview_enabled?.[type as keyof typeof settings.preview_enabled] ?? true;
+                const enabled = settings.explorer.preview_enabled?.[type as keyof typeof settings.explorer.preview_enabled] ?? true;
                 if (enabled) {
                     openPreview({ ...entry, path: entry.canonical_path });
                 } else {
@@ -460,128 +460,128 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
                         onMouseLeave={onMouseUp}
                     >
                         {tab.loading && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-50">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                    </div>
-                )}
+                            <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-50">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                            </div>
+                        )}
 
-                {!tab.loading && tab.entries.length === 0 && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground bg-background">
-                        <span className="text-4xl mb-2">📂</span>
-                        <p className="text-sm font-medium">Folder is empty</p>
-                    </div>
-                )}
+                        {!tab.loading && tab.entries.length === 0 && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground bg-background">
+                                <span className="text-4xl mb-2">📂</span>
+                                <p className="text-sm font-medium">Folder is empty</p>
+                            </div>
+                        )}
 
-                {selectionRect && (
-                    <div
-                        className="absolute bg-primary/20 border border-primary/50 pointer-events-none z-50 rounded-sm"
-                        style={{
-                            left: selectionRect.x,
-                            top: selectionRect.y,
-                            width: selectionRect.width,
-                            height: selectionRect.height,
-                        }}
-                    />
-                )}
-                {isGrid ? (
-                    <div className="p-4 space-y-6">
-                        {GROUP_ORDER.map(({ key, label }) => {
-                            const groupEntries = groupedRows.filter(
-                                (r) => r.kind === "entry" && getGroupKey(r.entry) === key
-                            ) as { kind: "entry"; entry: FileEntry }[];
-                            if (groupEntries.length === 0) return null;
-                            return (
-                                <div key={key}>
-                                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 px-1">
-                                        {label}
-                                    </div>
-                                    <hr className="border-border/60 mb-2" />
-                                    <div
-                                        className="grid gap-4"
-                                        style={{
-                                            gridTemplateColumns: `repeat(auto-fill, minmax(${Math.max(80, grid_thumbnail_width + 48)}px, 1fr))`,
-                                        }}
-                                    >
-                                        {groupEntries.map(({ entry }) => (
-                                            <FileContextMenu key={entry.path} entry={entry} tabId={tab.id}>
-                                                <GridTile
+                        {selectionRect && (
+                            <div
+                                className="absolute bg-primary/20 border border-primary/50 pointer-events-none z-50 rounded-sm"
+                                style={{
+                                    left: selectionRect.x,
+                                    top: selectionRect.y,
+                                    width: selectionRect.width,
+                                    height: selectionRect.height,
+                                }}
+                            />
+                        )}
+                        {isGrid ? (
+                            <div className="p-4 space-y-6">
+                                {GROUP_ORDER.map(({ key, label }) => {
+                                    const groupEntries = groupedRows.filter(
+                                        (r) => r.kind === "entry" && getGroupKey(r.entry) === key
+                                    ) as { kind: "entry"; entry: FileEntry }[];
+                                    if (groupEntries.length === 0) return null;
+                                    return (
+                                        <div key={key}>
+                                            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 px-1">
+                                                {label}
+                                            </div>
+                                            <hr className="border-border/60 mb-2" />
+                                            <div
+                                                className="grid gap-4"
+                                                style={{
+                                                    gridTemplateColumns: `repeat(auto-fill, minmax(${Math.max(80, grid_thumbnail_width + 48)}px, 1fr))`,
+                                                }}
+                                            >
+                                                {groupEntries.map(({ entry }) => (
+                                                    <FileContextMenu key={entry.path} entry={entry} tabId={tab.id}>
+                                                        <GridTile
+                                                            entry={entry}
+                                                            selected={tab.selection.has(entry.path)}
+                                                            isActive={isActive}
+                                                            onClick={(e) => onItemClick(entry, e)}
+                                                            onToggleSelect={() => toggleSelection(tab.id, entry.path)}
+                                                        />
+                                                    </FileContextMenu>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div style={{ height: rowVirtualizer.getTotalSize(), width: "100%", position: "relative" }}>
+                                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                                    const row = groupedRows[virtualRow.index];
+                                    if (!row) return null;
+                                    if (row.kind === "header") {
+                                        return (
+                                            <div
+                                                key={`header-${virtualRow.index}-${row.label}`}
+                                                style={{
+                                                    position: "absolute",
+                                                    top: 0,
+                                                    left: 0,
+                                                    width: "100%",
+                                                    height: virtualRow.size,
+                                                    transform: `translateY(${virtualRow.start}px)`,
+                                                }}
+                                                className="flex items-center px-4 py-1.5 bg-muted/30 border-b text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                                            >
+                                                {row.label}
+                                            </div>
+                                        );
+                                    }
+                                    const entry = row.entry;
+                                    return (
+                                        <div
+                                            key={entry.path}
+                                            style={{
+                                                position: "absolute",
+                                                top: 0,
+                                                left: 0,
+                                                width: "100%",
+                                                height: virtualRow.size,
+                                                transform: `translateY(${virtualRow.start}px)`,
+                                            }}
+                                        >
+                                            <FileContextMenu entry={entry} tabId={tab.id}>
+                                                <FileRow
                                                     entry={entry}
                                                     selected={tab.selection.has(entry.path)}
                                                     isActive={isActive}
                                                     onClick={(e) => onItemClick(entry, e)}
                                                     onToggleSelect={() => toggleSelection(tab.id, entry.path)}
+                                                    style={{ width: "100%", height: virtualRow.size }}
                                                 />
                                             </FileContextMenu>
-                                        ))}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                ) : (
-                    <div style={{ height: rowVirtualizer.getTotalSize(), width: "100%", position: "relative" }}>
-                        {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                            const row = groupedRows[virtualRow.index];
-                            if (!row) return null;
-                            if (row.kind === "header") {
-                                return (
-                                    <div
-                                        key={`header-${virtualRow.index}-${row.label}`}
-                                        style={{
-                                            position: "absolute",
-                                            top: 0,
-                                            left: 0,
-                                            width: "100%",
-                                            height: virtualRow.size,
-                                            transform: `translateY(${virtualRow.start}px)`,
-                                        }}
-                                        className="flex items-center px-4 py-1.5 bg-muted/30 border-b text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-                                    >
-                                        {row.label}
-                                    </div>
-                                );
-                            }
-                            const entry = row.entry;
-                            return (
-                                <div
-                                    key={entry.path}
-                                    style={{
-                                        position: "absolute",
-                                        top: 0,
-                                        left: 0,
-                                        width: "100%",
-                                        height: virtualRow.size,
-                                        transform: `translateY(${virtualRow.start}px)`,
-                                    }}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                        {tab.has_more && !tab.loading && tab.entries.length > 0 && (
+                            <div className="py-2 px-4 border-t bg-muted/20 flex justify-center">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-xs"
+                                    disabled={tab.loading}
+                                    onClick={() => loadMore(tab.id)}
                                 >
-                                    <FileContextMenu entry={entry} tabId={tab.id}>
-                                        <FileRow
-                                            entry={entry}
-                                            selected={tab.selection.has(entry.path)}
-                                            isActive={isActive}
-                                            onClick={(e) => onItemClick(entry, e)}
-                                            onToggleSelect={() => toggleSelection(tab.id, entry.path)}
-                                            style={{ width: "100%", height: virtualRow.size }}
-                                        />
-                                    </FileContextMenu>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-                {tab.has_more && !tab.loading && tab.entries.length > 0 && (
-                    <div className="py-2 px-4 border-t bg-muted/20 flex justify-center">
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-xs"
-                            disabled={tab.loading}
-                            onClick={() => loadMore(tab.id)}
-                        >
-                            {tab.loading ? "Loading..." : `Load more (${tab.entries.length} of ${tab.total} shown)`}
-                        </Button>
-                    </div>
-                )}
+                                    {tab.loading ? "Loading..." : `Load more (${tab.entries.length} of ${tab.total} shown)`}
+                                </Button>
+                            </div>
+                        )}
                     </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent className="w-44 text-xs [&_button]:text-xs">

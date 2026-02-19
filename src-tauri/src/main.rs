@@ -6,18 +6,18 @@ mod commands;
 use commands::dir::{read_dir_chunked, create_folder, create_file, rename_item};
 use commands::copy::start_copy;
 use commands::move_op::start_move;
-use commands::batch::{delete_items, batch_copy, batch_move};
+use commands::batch::{delete_items, batch_copy, batch_move, fast_copy};
 use commands::thumbnails::{get_thumbnail, get_video_thumbnail};
 use commands::preview_op::{get_file_text_content, get_file_base64_content, get_file_blob, show_in_finder, open_item};
 use commands::operation::cancel_operation;
 use commands::search::{start_file_search, start_content_search};
-use commands::watch::{start_watching, stop_watching};
-use commands::engine::{generate_thumbnail, get_metadata};
 
 use commands::volumes::list_volumes;
 use commands::settings::{load_settings, save_settings};
 use commands::dedupe::find_duplicates;
+use commands::content_search::find_content_by_category;
 use commands::tree::get_tree_nodes;
+use commands::cleaner::{find_empty_folders, delete_empty_folders};
 
 use tauri::http::{header::*, Response, status::StatusCode};
 use std::io::{Read, Seek, SeekFrom};
@@ -109,6 +109,7 @@ fn main() {
             delete_items,
             batch_copy,
             batch_move,
+            fast_copy,
             get_thumbnail,
             get_video_thumbnail,
             get_file_text_content,
@@ -119,15 +120,14 @@ fn main() {
             cancel_operation,
             start_file_search,
             start_content_search,
-            start_watching,
-            stop_watching,
-            generate_thumbnail,
-            get_metadata,
             list_volumes,
             load_settings,
             save_settings,
             find_duplicates,
+            find_content_by_category,
             get_tree_nodes,
+            find_empty_folders,
+            delete_empty_folders,
             crate::commands::setup::check_system_requirements,
             crate::commands::setup::check_ollama_status,
             crate::commands::setup::pull_model,
