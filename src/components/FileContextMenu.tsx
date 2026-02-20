@@ -54,9 +54,9 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
             updateQueue(queueId, { folderPath: entry.path });
             toast.success("Destination updated");
         } else {
-            const name = `queue-${queues.length + 1}`;
+            const name = entry.name;
             addMoveQueue(name, entry.path);
-            toast.success(`Created ${name} with this folder as destination`);
+            toast.success(`Created queue "${name}" with this folder as destination`);
         }
     };
 

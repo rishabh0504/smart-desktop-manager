@@ -22,12 +22,14 @@ interface ContentTypeState {
     scanning: boolean;
     progress: ProgressEvent | null;
     expandedCategories: Set<string>;
+    groupBy: "category" | "folder";
 
     addToQueue: (path: string) => void;
     removeFromQueue: (path: string) => void;
     clearQueue: () => void;
     startScan: () => Promise<void>;
     toggleCategory: (category: string) => void;
+    setGroupBy: (mode: "category" | "folder") => void;
     reset: () => void;
 }
 
@@ -37,6 +39,7 @@ export const useContentTypeStore = create<ContentTypeState>((set, get) => ({
     scanning: false,
     progress: null,
     expandedCategories: new Set(),
+    groupBy: "category",
 
     addToQueue: (path) => {
         if (!get().scanQueue.includes(path)) {
@@ -58,6 +61,8 @@ export const useContentTypeStore = create<ContentTypeState>((set, get) => ({
             return { expandedCategories: newExpanded };
         });
     },
+
+    setGroupBy: (groupBy) => set({ groupBy, expandedCategories: new Set() }),
 
     reset: () => {
         set({ groups: [], scanning: false, progress: null, expandedCategories: new Set() });

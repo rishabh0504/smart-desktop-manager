@@ -6,10 +6,19 @@ import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { FileEntry } from "@/types/explorer";
 import { invoke } from "@tauri-apps/api/core";
-import { Trash2, FileText, FileQuestion, Folder, Loader2, X, ChevronUp, ChevronDown } from "lucide-react";
+import { Trash2, FileText, FileQuestion, Folder, Loader2, X, ChevronUp, ChevronDown, ArrowRightLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { isVideoExtension } from "@/lib/fileTypes";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useMoveQueueStore } from "@/stores/moveQueueStore";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 
 function PreviewPane({ entry }: { entry: FileEntry | null }) {
     const [content, setContent] = useState<string | null>(null);
@@ -132,6 +141,11 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
     const [selected, setSelected] = useState<FileEntry | null>(null);
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+    const [targetQueueId, setTargetQueueId] = useState<string>("");
+
+    const moveQueues = useMoveQueueStore((s) => s.queues);
+    const addManyToMoveQueue = useMoveQueueStore((s) => s.addManyToQueue);
 
     const listRef = useRef<HTMLUListElement>(null);
 
@@ -139,12 +153,19 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
         if (!open) {
             setSelected(null);
             setConfirmOpen(false);
+            setBulkSelected(new Set());
         } else if (queue.length > 0) {
             setSelected((prev) => (prev && queue.some((e) => e.path === prev.path) ? prev : queue[0]));
         } else {
             setSelected(null);
         }
     }, [open, queue.length]);
+
+    useEffect(() => {
+        if (moveQueues.length > 0 && !targetQueueId) {
+            setTargetQueueId(moveQueues[0].id);
+        }
+    }, [moveQueues, targetQueueId]);
 
     useEffect(() => {
         if (selected && !queue.some((e) => e.path === selected.path)) {
@@ -207,6 +228,32 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
         }
     }, [queue, clearQueue, onOpenChange, tabs, refresh]);
 
+    const toggleBulk = (path: string) => {
+        setBulkSelected(prev => {
+            const next = new Set(prev);
+            if (next.has(path)) next.delete(path);
+            else next.add(path);
+            return next;
+        });
+    };
+
+    const toggleAll = () => {
+        if (bulkSelected.size === queue.length) {
+            setBulkSelected(new Set());
+        } else {
+            setBulkSelected(new Set(queue.map(e => e.path)));
+        }
+    };
+
+    const handleBulkMove = () => {
+        if (bulkSelected.size === 0 || !targetQueueId) return;
+        const itemsToMove = queue.filter(e => bulkSelected.has(e.path));
+        addManyToMoveQueue(targetQueueId, itemsToMove);
+        itemsToMove.forEach(e => removeFromQueue(e.path));
+        setBulkSelected(new Set());
+        toast.success(`Moved ${itemsToMove.length} items to queue`);
+    };
+
     return (
         <>
             <Dialog open={open} onOpenChange={onOpenChange}>
@@ -225,10 +272,17 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
 
                     <div className="flex-1 flex min-h-0">
                         <div className="w-80 shrink-0 flex flex-col border-r bg-muted/5">
-                            <div className="px-3 py-2.5 border-b flex items-center justify-between bg-muted/10">
-                                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
-                                    Queued items
-                                </span>
+                            <div className="px-3 py-2 border-b flex items-center justify-between bg-muted/10">
+                                <div className="flex items-center gap-2">
+                                    <Checkbox
+                                        checked={bulkSelected.size === queue.length && queue.length > 0}
+                                        onCheckedChange={toggleAll}
+                                        className="h-3.5 w-3.5"
+                                    />
+                                    <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                                        Queued items
+                                    </span>
+                                </div>
                                 {queue.length > 0 && (
                                     <div className="flex items-center gap-0.5">
                                         <Button
@@ -265,13 +319,19 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
                                             <li
                                                 key={entry.path}
                                                 className={cn(
-                                                    "flex items-center gap-2 rounded-lg p-2.5 text-sm cursor-pointer group transition-colors",
+                                                    "flex items-center gap-2 rounded-lg p-2 text-sm cursor-pointer group transition-colors",
                                                     selected?.path === entry.path
                                                         ? "bg-primary/15 ring-1 ring-primary/40 shadow-sm"
                                                         : "hover:bg-muted/50"
                                                 )}
                                                 onClick={() => setSelected(entry)}
                                             >
+                                                <Checkbox
+                                                    checked={bulkSelected.has(entry.path)}
+                                                    onCheckedChange={() => toggleBulk(entry.path)}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="h-3.5 w-3.5"
+                                                />
                                                 {entry.is_dir ? (
                                                     <Folder className="w-4 h-4 shrink-0 text-blue-500" />
                                                 ) : (
@@ -306,9 +366,42 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
                     </div>
 
                     <div className="px-6 py-4 border-t flex justify-between items-center shrink-0 bg-muted/5">
-                        <span className="text-xs text-muted-foreground">
-                            ↑ ↓ to move selection • Click to preview before deleting
-                        </span>
+                        <div className="flex items-center gap-4">
+                            {bulkSelected.size > 0 && (
+                                <div className="flex items-center gap-2 p-1 pl-3 bg-muted/20 border rounded-lg animate-in fade-in slide-in-from-bottom-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                                        {bulkSelected.size} selected
+                                    </span>
+                                    <div className="flex items-center gap-1 ml-2">
+                                        <ArrowRightLeft className="w-3.5 h-3.5 text-muted-foreground mr-1" />
+                                        <Select value={targetQueueId} onValueChange={setTargetQueueId}>
+                                            <SelectTrigger className="h-7 text-xs w-[140px] bg-background">
+                                                <SelectValue placeholder="Target Queue" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {moveQueues.map(q => (
+                                                    <SelectItem key={q.id} value={q.id}>
+                                                        {q.name}
+                                                    </SelectItem>
+                                                ))}
+                                                {moveQueues.length === 0 && (
+                                                    <SelectItem value="none" disabled>No queues found</SelectItem>
+                                                )}
+                                            </SelectContent>
+                                        </Select>
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            className="h-7 text-[10px] font-bold"
+                                            onClick={handleBulkMove}
+                                            disabled={!targetQueueId || targetQueueId === "none"}
+                                        >
+                                            MOVE TO QUEUE
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                         <Button
                             variant="destructive"
                             size="sm"

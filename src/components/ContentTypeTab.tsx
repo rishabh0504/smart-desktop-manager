@@ -24,8 +24,8 @@ import {
     Image as ImageIcon,
     Music,
     Archive,
-    Trash2,
-    LayoutGrid
+    LayoutGrid,
+    Folders
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -52,6 +52,8 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
     const groups = useContentTypeStore((state) => state.groups);
     const scanQueue = useContentTypeStore((state) => state.scanQueue);
     const expandedCategories = useContentTypeStore((state) => state.expandedCategories);
+    const groupBy = useContentTypeStore((state) => state.groupBy);
+    const setGroupBy = useContentTypeStore((state) => state.setGroupBy);
 
     // Local selection state for bulk actions
     const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
@@ -173,6 +175,8 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
     };
 
     const getCategoryIcon = (category: string) => {
+        if (groupBy === "folder") return <FolderOpen className="w-4 h-4 text-blue-500" />;
+
         switch (category.toLowerCase()) {
             case "images": return <ImageIcon className="w-4 h-4 text-pink-500" />;
             case "videos": return <Video className="w-4 h-4 text-red-500" />;
@@ -183,11 +187,30 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
         }
     };
 
+    // Computed groups based on groupBy mode
+    const displayGroups = (() => {
+        if (groupBy === "category") return groups;
+
+        const folderMap: Record<string, string[]> = {};
+        groups.forEach(group => {
+            group.paths.forEach(path => {
+                const folder = path.split(/[/\\]/).slice(0, -1).join("/") || "/";
+                if (!folderMap[folder]) folderMap[folder] = [];
+                folderMap[folder].push(path);
+            });
+        });
+
+        return Object.entries(folderMap).map(([folder, paths]) => ({
+            category: folder,
+            paths
+        })).sort((a, b) => a.category.localeCompare(b.category));
+    })();
+
     const virtualizer = useVirtualizer({
-        count: groups.length,
+        count: displayGroups.length,
         getScrollElement: () => scrollRef.current,
         estimateSize: (index) => {
-            const group = groups[index];
+            const group = displayGroups[index];
             if (group && expandedCategories.has(String(group.category))) {
                 return 60 + (group.paths.length * 40) + 12;
             }
@@ -198,7 +221,7 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
 
     useEffect(() => {
         virtualizer.measure();
-    }, [groups, expandedCategories, previewTarget, virtualizer]);
+    }, [displayGroups, expandedCategories, previewTarget, virtualizer]);
 
     return (
         <div className="flex h-full bg-background border rounded-md overflow-hidden transition-colors">
@@ -250,59 +273,82 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
                         </div>
                     </div>
 
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Folders to Scan</h3>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 text-[10px] gap-1 text-primary hover:bg-primary/10"
-                                onClick={async () => {
-                                    try {
-                                        const selected = await open({
-                                            directory: true,
-                                            multiple: true,
-                                            title: "Select Folders to Scan"
-                                        });
-                                        if (selected) {
-                                            const items = Array.isArray(selected) ? selected : [selected];
-                                            const paths = items.map(item => typeof item === 'string' ? item : (item as any).path);
-                                            paths.forEach(p => {
-                                                if (p) addToQueue(p);
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="space-y-3 flex-1">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Included Folders</h3>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-[10px] gap-1 text-primary hover:bg-primary/10"
+                                    onClick={async () => {
+                                        try {
+                                            const selected = await open({
+                                                directory: true,
+                                                multiple: true,
+                                                title: "Select Folders to Scan"
                                             });
+                                            if (selected) {
+                                                const items = Array.isArray(selected) ? selected : [selected];
+                                                items.forEach(p => {
+                                                    if (p) addToQueue(typeof p === 'string' ? p : (p as any).path);
+                                                });
+                                            }
+                                        } catch (err) {
+                                            console.error("Failed to add folders:", err);
                                         }
-                                    } catch (err) {
-                                        console.error("Failed to add folders:", err);
-                                    }
-                                }}
+                                    }}
+                                >
+                                    <FolderPlus className="w-3 h-3" />
+                                    Add Folders
+                                </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {scanQueue.map(path => (
+                                    <div key={path} className="group flex items-center gap-2 bg-background border px-3 py-1.5 rounded-lg text-xs font-medium shadow-sm hover:border-primary/50 transition-colors">
+                                        <ChevronRight className="w-3 h-3 text-primary" />
+                                        <span className="max-w-[200px] truncate lowercase">{path}</span>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-4 w-4 ml-1 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive hover:text-destructive-foreground rounded-sm"
+                                            onClick={() => removeFromQueue(path)}
+                                        >
+                                            <X className="w-2.5 h-2.5" />
+                                        </Button>
+                                    </div>
+                                ))}
+                                {scanQueue.length === 0 && (
+                                    <div className="flex items-center gap-2 text-destructive text-xs font-medium bg-destructive/10 px-3 py-1.5 rounded-lg border border-destructive/20 animate-pulse">
+                                        <AlertTriangle className="w-3 h-3" />
+                                        Select folders from the sidebar or click "Add Folders" to start.
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-1 bg-muted/30 p-1 rounded-lg ml-6">
+                            <Button
+                                variant={groupBy === "category" ? "secondary" : "ghost"}
+                                size="sm"
+                                className="h-7 px-2 text-[10px] font-bold gap-1"
+                                onClick={() => setGroupBy("category")}
                             >
-                                <FolderPlus className="w-3 h-3" />
-                                Add Folders
+                                <LayoutGrid className="w-3 h-3" />
+                                CATEGORY
+                            </Button>
+                            <Button
+                                variant={groupBy === "folder" ? "secondary" : "ghost"}
+                                size="sm"
+                                className="h-7 px-2 text-[10px] font-bold gap-1"
+                                onClick={() => setGroupBy("folder")}
+                            >
+                                <Folders className="w-3 h-3" />
+                                FOLDER
                             </Button>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                            {scanQueue.map(path => (
-                                <div key={path} className="group flex items-center gap-2 bg-background border px-3 py-1.5 rounded-lg text-xs font-medium shadow-sm hover:border-primary/50 transition-colors">
-                                    <ChevronRight className="w-3 h-3 text-primary" />
-                                    <span className="max-w-[200px] truncate lowercase">{path}</span>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-4 w-4 ml-1 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive hover:text-destructive-foreground rounded-sm"
-                                        onClick={() => removeFromQueue(path)}
-                                    >
-                                        <Trash2 className="w-2.5 h-2.5" />
-                                    </Button>
-                                </div>
-                            ))}
-                            {scanQueue.length === 0 && (
-                                <div className="flex items-center gap-2 text-destructive text-xs font-medium bg-destructive/10 px-3 py-1.5 rounded-lg border border-destructive/20 animate-pulse">
-                                    <AlertTriangle className="w-3 h-3" />
-                                    Add at least one folder and then hit Start Search.
-                                </div>
-                            )}
-                        </div>
                     </div>
+
                 </div>
 
                 {scanning && progress && (
@@ -402,7 +448,7 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
                                 className="w-full"
                             >
                                 {virtualizer.getVirtualItems().map((virtualRow) => {
-                                    const group = groups[virtualRow.index];
+                                    const group = displayGroups[virtualRow.index];
                                     if (!group) return null;
                                     const isExpanded = expandedCategories.has(String(group.category));
 

@@ -3,7 +3,8 @@ import {
     ContextMenu,
     ContextMenuContent,
     ContextMenuItem,
-    ContextMenuTrigger
+    ContextMenuTrigger,
+    ContextMenuSeparator
 } from "@/components/ui/context-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -30,7 +31,8 @@ import {
     Music,
     Star,
     Usb,
-    Eraser
+    Eraser,
+    Pencil
 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -213,7 +215,7 @@ interface TreeItemProps {
 }
 
 const TreeItem = ({ node, depth, icon, subLabel }: TreeItemProps) => {
-    const { expandedPaths, toggleExpand, treeNodes, handlePathClick } = useSidebarStore();
+    const { expandedPaths, toggleExpand, treeNodes, handlePathClick, refreshVolumes } = useSidebarStore();
     const isExpanded = expandedPaths.has(node.path);
     const children = treeNodes[node.path] || [];
     const [isDragOver, setIsDragOver] = useState(false);
@@ -285,6 +287,18 @@ const TreeItem = ({ node, depth, icon, subLabel }: TreeItemProps) => {
         addToDedupe(node.path);
         toast.success("Added to Duplicate Finder queue");
         setActiveView("dedupe");
+    };
+    const handleRename = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const newName = window.prompt("Enter new name:", node.name);
+        if (!newName || newName === node.name) return;
+        try {
+            await invoke("rename_item", { path: node.path, newName });
+            toast.success("Renamed successfully");
+            refreshVolumes();
+        } catch (error) {
+            toast.error(`Rename failed: ${error}`);
+        }
     };
 
     return (
@@ -365,6 +379,11 @@ const TreeItem = ({ node, depth, icon, subLabel }: TreeItemProps) => {
                 }}>
                     <Eraser className="w-4 h-4 mr-2" />
                     Clean Empty Folders
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem onClick={handleRename}>
+                    <Pencil className="w-4 h-4 mr-2" />
+                    Rename
                 </ContextMenuItem>
             </ContextMenuContent>
         </ContextMenu>

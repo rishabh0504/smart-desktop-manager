@@ -31,6 +31,7 @@ import {
     ClipboardPaste,
     RefreshCw,
     FolderOpen,
+    Pencil,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
@@ -383,6 +384,22 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
     const handleShowFolderInFinder = useCallback(() => {
         invoke("show_in_finder", { path: tab.path });
     }, [tab.path]);
+    const handleRenameCurrentFolder = useCallback(async () => {
+        const currentPath = tab.path;
+        const currentName = currentPath.split(/[/\\]/).pop() || currentPath;
+        const newName = window.prompt("Enter new folder name:", currentName);
+        if (!newName || newName === currentName) return;
+        try {
+            await invoke("rename_item", { path: currentPath, newName });
+            toast.success("Folder renamed");
+            // After renaming the current folder, we need to navigate to the new path
+            const parent = currentPath.split(/[/\\]/).slice(0, -1).join("/");
+            const newPath = `${parent}/${newName}`;
+            setPath(tab.id, newPath);
+        } catch (error) {
+            toast.error(`Rename failed: ${error}`);
+        }
+    }, [tab.id, tab.path, setPath]);
 
     return (
         <div
@@ -601,6 +618,10 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
                     </ContextMenuItem>
                     <ContextMenuItem onClick={handleShowFolderInFinder} className="text-xs">
                         <FolderOpen className="w-3.5 h-3.5 mr-2" /> Show in Finder
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={handleRenameCurrentFolder} className="text-xs">
+                        <Pencil className="w-3.5 h-3.5 mr-2" /> Rename this folder
                     </ContextMenuItem>
                 </ContextMenuContent>
             </ContextMenu>

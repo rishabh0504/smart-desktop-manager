@@ -6,6 +6,7 @@ import { useExplorerStore } from "@/stores/explorerStore";
 import { Button } from "@/components/ui/button";
 import { createDragGhost } from "@/lib/dragUtils";
 import { isVideoExtension } from "@/lib/fileTypes";
+import { invoke } from "@tauri-apps/api/core";
 
 function getRowIcon(entry: FileEntry) {
     if (entry.is_dir) return <Folder className="w-4 h-4 fill-current text-sky-500" />;
@@ -28,16 +29,62 @@ interface FileRowProps {
 }
 
 export const FileRow = React.memo(({ entry, selected, isActive, onClick, style, onToggleSelect }: FileRowProps) => {
+    const [isDragOver, setIsDragOver] = React.useState(false);
+    const refresh = useExplorerStore(state => state.refresh);
+    const activeTabId = useExplorerStore(state => state.activeTabId);
+
+    const handleDragOver = (e: React.DragEvent) => {
+        if (!entry.is_dir) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(true);
+        e.dataTransfer.dropEffect = "move";
+    };
+
+    const handleDragLeave = () => {
+        setIsDragOver(false);
+    };
+
+    const handleDrop = async (e: React.DragEvent) => {
+        if (!entry.is_dir) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(false);
+
+        const filesData = e.dataTransfer.getData("application/x-super-explorer-files");
+        if (!filesData) return;
+
+        try {
+            const sources: string[] = JSON.parse(filesData);
+            if (sources.length === 0) return;
+
+            // Don't drop into self or subfolders
+            if (sources.some(src => entry.path === src || entry.path.startsWith(src + "/"))) return;
+
+            await invoke("batch_move", {
+                operationId: crypto.randomUUID(),
+                sources,
+                destinationDir: entry.path
+            });
+            if (activeTabId) refresh(activeTabId);
+        } catch (err) {
+            console.error("Drop failed:", err);
+        }
+    };
 
     return (
         <div
             style={style}
             className={cn(
-                "flex items-center px-4 py-1 cursor-default select-none border-b border-transparent hover:bg-accent/50",
+                "flex items-center px-4 py-1 cursor-default select-none border-b border-transparent hover:bg-accent/50 transition-colors",
                 selected && "bg-accent text-accent-foreground",
-                isActive && "border-l-2 border-l-primary"
+                isActive && "border-l-2 border-l-primary",
+                isDragOver && "bg-primary/20 ring-1 ring-inset ring-primary"
             )}
             draggable
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
             onDragStart={(e) => {
                 const { tabs, activeTabId } = useExplorerStore.getState();
                 const tab = tabs.find(t => t.id === activeTabId);

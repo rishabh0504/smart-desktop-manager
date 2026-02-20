@@ -22,6 +22,48 @@ export const GridTile = ({ entry, selected, isActive, onClick, style, onToggleSe
     const [thumbnail, setThumbnail] = useState<string | null>(null);
     const gridWidth = useSettingsStore((s) => s.grid_thumbnail_width);
     const gridHeight = useSettingsStore((s) => s.grid_thumbnail_height);
+    const [isDragOver, setIsDragOver] = useState(false);
+    const refresh = useExplorerStore(state => state.refresh);
+    const activeTabId = useExplorerStore(state => state.activeTabId);
+
+    const handleDragOver = (e: React.DragEvent) => {
+        if (!entry.is_dir) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(true);
+        e.dataTransfer.dropEffect = "move";
+    };
+
+    const handleDragLeave = () => {
+        setIsDragOver(false);
+    };
+
+    const handleDrop = async (e: React.DragEvent) => {
+        if (!entry.is_dir) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(false);
+
+        const filesData = e.dataTransfer.getData("application/x-super-explorer-files");
+        if (!filesData) return;
+
+        try {
+            const sources: string[] = JSON.parse(filesData);
+            if (sources.length === 0) return;
+
+            // Don't drop into self or subfolders
+            if (sources.some(src => entry.path === src || entry.path.startsWith(src + "/"))) return;
+
+            await invoke("batch_move", {
+                operationId: crypto.randomUUID(),
+                sources,
+                destinationDir: entry.path
+            });
+            if (activeTabId) refresh(activeTabId);
+        } catch (err) {
+            console.error("Drop failed:", err);
+        }
+    };
 
     const isImage = !entry.is_dir && ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(entry.extension?.toLowerCase() || '');
     const isVideo = !entry.is_dir && isVideoExtension(entry.extension);
@@ -58,8 +100,12 @@ export const GridTile = ({ entry, selected, isActive, onClick, style, onToggleSe
                 "group flex flex-col items-center justify-start gap-3 p-3 rounded-xl cursor-pointer transition-all border bg-card hover:bg-accent/50 hover:shadow-md hover:-translate-y-0.5 active:scale-95",
                 selected ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20" : "border-border/50",
                 isActive && selected && "border-primary bg-primary/10",
+                isDragOver && "bg-primary/20 ring-2 ring-primary border-primary"
             )}
             draggable
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
             onDragStart={(e) => {
                 const { tabs, activeTabId } = useExplorerStore.getState();
                 const tab = tabs.find(t => t.id === activeTabId);

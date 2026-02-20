@@ -37,6 +37,7 @@ interface MoveQueueState {
     updateQueue: (id: string, updates: { name?: string; folderPath?: string }) => void;
     removeQueue: (id: string) => void;
     addToQueue: (queueId: string, entry: FileEntry) => void;
+    addManyToQueue: (queueId: string, entries: FileEntry[]) => void;
     removeFromQueue: (queueId: string, path: string) => void;
     moveItemToQueue: (fromQueueId: string, toQueueId: string, entryPath: string) => void;
     clearQueue: (queueId: string) => void;
@@ -82,6 +83,18 @@ export const useMoveQueueStore = create<MoveQueueState>((set, get) => ({
                 if (q.id !== queueId) return q;
                 if (q.items.some((e) => e.path === entry.path)) return q;
                 return { ...q, items: [...q.items, { ...entry }] };
+            });
+            saveToStorage(next);
+            return { queues: next };
+        }),
+
+    addManyToQueue: (queueId, entries) =>
+        set((state) => {
+            const next = state.queues.map((q) => {
+                if (q.id !== queueId) return q;
+                const existingPaths = new Set(q.items.map((e) => e.path));
+                const newItems = entries.filter((e) => !existingPaths.has(e.path));
+                return { ...q, items: [...q.items, ...newItems] };
             });
             saveToStorage(next);
             return { queues: next };
