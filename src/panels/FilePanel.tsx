@@ -34,6 +34,7 @@ import {
     RefreshCw,
     FolderOpen,
     Pencil,
+    FileArchive,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
@@ -424,6 +425,33 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
         }
     };
 
+    const handleCompressSelected = useCallback(async () => {
+        if (tab.selection.size === 0) return;
+
+        try {
+            toast.info("Compressing selected items to zip...");
+            const selectedPaths = Array.from(tab.selection);
+            const parentBase = tab.path.replace(/[/\\]+$/, "") || "";
+            let zipName = "Archive.zip";
+
+            if (tab.selection.size === 1) {
+                const singlePath = selectedPaths[0];
+                const singleName = singlePath.split(/[/\\]/).pop() || "Archive";
+                zipName = `${singleName.replace(/\.[^/.]+$/, "")}.zip`;
+            }
+
+            const destPath = `${parentBase}/${zipName}`;
+
+            await invoke("compress_to_zip", { paths: selectedPaths, destPath });
+            toast.success("Compression complete");
+            // Clear selection and refresh
+            useExplorerStore.getState().clearSelection(tab.id);
+            refresh(tab.id);
+        } catch (error) {
+            toast.error(`Compression failed: ${error}`);
+        }
+    }, [tab.id, tab.path, tab.selection, refresh]);
+
     return (
         <div
             className={cn(
@@ -646,6 +674,15 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
                     <ContextMenuItem onClick={handleRenameCurrentFolder} className="text-xs">
                         <Pencil className="w-3.5 h-3.5 mr-2" /> Rename this folder
                     </ContextMenuItem>
+
+                    {tab.selection.size > 0 && (
+                        <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onClick={handleCompressSelected} className="text-xs">
+                                <FileArchive className="w-3.5 h-3.5 mr-2" /> Compress {tab.selection.size} selected item(s) to Zip
+                            </ContextMenuItem>
+                        </>
+                    )}
                 </ContextMenuContent>
             </ContextMenu>
 

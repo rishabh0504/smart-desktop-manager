@@ -14,3 +14,4 @@ pub mod content_search;
 pub mod tree;
 pub mod setup;
 pub mod cleaner;
+pub mod archive;

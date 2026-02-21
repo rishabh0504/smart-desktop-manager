@@ -10,7 +10,7 @@ import { useDedupeStore } from "@/stores/dedupeStore";
 import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
 import { useMoveQueueStore } from "@/stores/moveQueueStore";
 import { toast } from "sonner";
-import { CopyCheck, FolderPlus, Pencil, Trash2, FolderInput } from "lucide-react";
+import { CopyCheck, FolderPlus, Pencil, Trash2, FolderInput, Archive, FileArchive } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 interface FileContextMenuProps {
     children: React.ReactNode;
@@ -110,6 +110,33 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
         const date = entry.modified ? new Date(entry.modified * 1000).toLocaleString() : "Unknown";
         const size = entry.size !== null ? formatSize(entry.size) : "Unknown";
         alert(`Name: ${entry.name}\nType: ${entry.extension || "Folder"}\nSize: ${size}\nModified: ${date}\nPath: ${entry.path}`);
+    };
+
+    const handleExtract = async () => {
+        try {
+            toast.info("Extracting archive...");
+            await invoke("extract_archive", { path: entry.path });
+            toast.success("Extraction complete");
+            refresh(tabId);
+        } catch (error) {
+            toast.error(`Extraction failed: ${error}`);
+        }
+    };
+
+    const handleCompress = async () => {
+        try {
+            toast.info("Compressing to zip...");
+            const currentTab = useExplorerStore.getState().tabs.find(t => t.id === tabId);
+            const parentBase = currentTab?.path.replace(/[/\\]+$/, "") || "";
+            const zipName = entry.is_dir ? `${entry.name}.zip` : `${entry.name.replace(/\.[^/.]+$/, "")}.zip`;
+            const destPath = `${parentBase}/${zipName}`;
+
+            await invoke("compress_to_zip", { paths: [entry.path], destPath });
+            toast.success("Compression complete");
+            refresh(tabId);
+        } catch (error) {
+            toast.error(`Compression failed: ${error}`);
+        }
     };
 
     const handleRename = () => {
@@ -225,6 +252,18 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
                         <Trash2 className="w-3.5 h-3.5 mr-2" /> Add to delete queue
                     </ContextMenuItem>
                     <ContextMenuItem onClick={handleDelete} className="text-xs text-red-500 hover:text-red-600">Delete</ContextMenuItem>
+
+                    <ContextMenuSeparator />
+
+                    {entry.extension && ["zip", "tar", "gz", "tgz", "rar", "7z"].includes(entry.extension.toLowerCase()) && (
+                        <ContextMenuItem onClick={handleExtract} className="text-xs">
+                            <Archive className="w-3.5 h-3.5 mr-2" /> Extract Archive
+                        </ContextMenuItem>
+                    )}
+                    <ContextMenuItem onClick={handleCompress} className="text-xs">
+                        <FileArchive className="w-3.5 h-3.5 mr-2" /> Compress to Zip
+                    </ContextMenuItem>
+
                     <ContextMenuSeparator />
                     <ContextMenuItem onClick={handleProperties} className="text-xs">Properties</ContextMenuItem>
                 </ContextMenuContent>

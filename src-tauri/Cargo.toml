@@ -53,4 +53,7 @@ hex = "0.4"
 percent-encoding = "2.3"
 moka = { version = "0.12", features = ["sync"] }
 zstd = "0.13"
+zip = "2.2.0"
+tar = "0.4.40"
+flate2 = "1.0.30"
 

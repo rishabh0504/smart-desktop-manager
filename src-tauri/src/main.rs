@@ -19,6 +19,7 @@ use commands::dedupe::find_duplicates;
 use commands::content_search::find_content_by_category;
 use commands::tree::get_tree_nodes;
 use commands::cleaner::{find_empty_folders, delete_empty_folders};
+use commands::archive::{extract_archive, compress_to_zip};
 
 use tauri::http::{header::*, Response, status::StatusCode};
 use std::io::{Read, Seek, SeekFrom};
@@ -132,7 +133,9 @@ fn main() {
             crate::commands::setup::check_system_requirements,
             crate::commands::setup::check_ollama_status,
             crate::commands::setup::pull_model,
-            crate::commands::setup::is_setup_complete
+            crate::commands::setup::is_setup_complete,
+            extract_archive,
+            compress_to_zip
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
