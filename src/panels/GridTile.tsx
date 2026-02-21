@@ -81,16 +81,16 @@ export const GridTile = ({ entry, selected, isActive, onClick, style, onToggleSe
     }, [entry.path, entry.extension, entry.is_dir, isImage, isVideo, gridWidth, gridHeight]);
 
     const getIcon = () => {
-        if (entry.is_dir) return <Folder className="w-10 h-10 text-sky-500" />;
+        if (entry.is_dir) return <Folder className="w-16 h-16 text-sky-500" />;
 
         const ext = entry.extension?.toLowerCase();
-        if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext || '')) return <ImageIcon className="w-10 h-10 text-blue-500/60" />;
-        if (isVideoExtension(ext)) return <Video className="w-10 h-10 text-purple-500/60" />;
-        if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext || '')) return <Music className="w-10 h-10 text-pink-500/60" />;
-        if (['txt', 'md', 'js', 'ts', 'tsx', 'py'].includes(ext || '')) return <FileText className="w-10 h-10 text-slate-500/60" />;
-        if (['pdf'].includes(ext || '')) return <FileSearch className="w-10 h-10 text-red-500/60" />;
+        if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext || '')) return <ImageIcon className="w-16 h-16 text-blue-500/60" />;
+        if (isVideoExtension(ext)) return <Video className="w-16 h-16 text-purple-500/60" />;
+        if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext || '')) return <Music className="w-16 h-16 text-pink-500/60" />;
+        if (['txt', 'md', 'js', 'ts', 'tsx', 'py'].includes(ext || '')) return <FileText className="w-16 h-16 text-slate-500/60" />;
+        if (['pdf'].includes(ext || '')) return <FileSearch className="w-16 h-16 text-red-500/60" />;
 
-        return <File className="w-10 h-10 text-muted-foreground/60" />;
+        return <File className="w-16 h-16 text-muted-foreground/60" />;
     };
 
     return (

@@ -24,7 +24,7 @@ export const TabBar = () => {
     };
 
     return (
-        <div className="flex items-center bg-muted/30 border-b overflow-x-auto no-scrollbar h-10 px-2 gap-1 select-none">
+        <div className="flex items-center bg-muted/10 border-b overflow-x-auto no-scrollbar h-9 px-2 gap-1 select-none shadow-inner">
             {tabs.map((tab) => {
                 const isActive = activeTabId === tab.id;
                 return (
@@ -33,10 +33,10 @@ export const TabBar = () => {
                         onMouseUp={(e) => handleMouseUp(e, tab.id)}
                         onClick={() => setActiveTab(tab.id)}
                         className={cn(
-                            "group relative flex items-center h-[34px] min-w-[120px] max-w-[200px] px-3 gap-2 rounded-t-lg transition-all cursor-pointer border-x border-t border-transparent",
+                            "group relative flex items-center h-[30px] min-w-[120px] max-w-[200px] px-3 gap-2 rounded-t-md transition-all cursor-pointer border-x border-t border-transparent",
                             isActive
                                 ? "bg-background border-border shadow-[0_-2px_8px_rgba(0,0,0,0.05)] z-10"
-                                : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
+                                : "hover:bg-muted/30 text-muted-foreground hover:text-foreground"
                         )}
                     >
                         <span className={cn(

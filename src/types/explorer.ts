@@ -61,7 +61,7 @@ export interface PreviewSettings {
     video: boolean;
     audio: boolean;
     text: boolean;
-    pdf: boolean;
+    document: boolean;
     archive: boolean;
     other: boolean;
 }

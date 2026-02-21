@@ -94,7 +94,7 @@ export const useExplorerStore = create<ExplorerStore>((set, get) => ({
     },
 
     addTab: (path = "/", type = "explorer") => {
-        const { tabs, setActiveTab, setPath } = get();
+        const { tabs, setActiveTab, setPath, setActiveView } = get();
 
         // Smart Open: If tab with this path exists, focus it
         const existingTab = tabs.find(t => t.path === path && t.type === type);
@@ -110,6 +110,8 @@ export const useExplorerStore = create<ExplorerStore>((set, get) => ({
             ...initialPanelState,
             path
         };
+
+        setActiveView("explorer");
 
         set(state => ({
             tabs: [...state.tabs, newTab],
@@ -142,7 +144,7 @@ export const useExplorerStore = create<ExplorerStore>((set, get) => ({
         });
     },
 
-    setActiveTab: (id) => set({ activeTabId: id }),
+    setActiveTab: (id) => set({ activeTabId: id, activeView: "explorer" }),
 
     setPath: async (tabId, path, updateHistory = true, force = false) => {
         const state = get();

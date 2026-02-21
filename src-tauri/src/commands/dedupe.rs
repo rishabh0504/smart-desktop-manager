@@ -13,6 +13,7 @@ use tauri::{Emitter, Runtime};
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
+use crate::utils::file_types::{get_file_category, is_category_enabled};
 
 /// Max files to consider in discovery phase to avoid OOM on 10TB+ volumes.
 const MAX_DEDUPE_DISCOVERY_FILES: usize = 10_000_000;
@@ -143,17 +144,9 @@ pub async fn find_duplicates<R: Runtime>(
                 continue;
             }
 
-            // Preview Type filter (for dedupe, this acts as an inclusion filter)
-            let is_allowed = match extension.as_str() {
-                "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" => settings.preview_enabled.image,
-                "mp4" | "mkv" | "mov" | "avi" | "webm" => settings.preview_enabled.video,
-                "mp3" | "wav" | "ogg" | "flac" | "m4a" => settings.preview_enabled.audio,
-                "txt" | "md" | "js" | "ts" | "py" | "rs" | "json" => settings.preview_enabled.text,
-                "pdf" => settings.preview_enabled.pdf,
-                _ => settings.preview_enabled.other,
-            };
-
-            if !is_allowed {
+            // Category/Preview filter
+            let category = get_file_category(&extension);
+            if !is_category_enabled(category, &settings) {
                 continue;
             }
 

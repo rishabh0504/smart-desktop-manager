@@ -10,7 +10,7 @@ pub struct PreviewSettings {
     pub video: bool,
     pub audio: bool,
     pub text: bool,
-    pub pdf: bool,
+    pub document: bool,
     pub archive: bool,
     pub other: bool,
 }
@@ -46,7 +46,7 @@ impl Default for PreviewSettings {
             video: true,
             audio: true,
             text: true,
-            pdf: true,
+            document: true,
             archive: false,
             other: true,
         }

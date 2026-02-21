@@ -23,6 +23,7 @@ import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
 import { useMoveQueueStore } from "@/stores/moveQueueStore";
 import { ThemeApplier } from "@/components/ThemeApplier";
 import { CleanTab } from "@/components/CleanTab";
+import { ActivityBar } from "@/components/ActivityBar";
 
 export const MainLayout = () => {
     const tabs = useExplorerStore((state) => state.tabs);
@@ -208,11 +209,12 @@ export const MainLayout = () => {
 
             {/* Main Content Area */}
             <div className="flex-1 flex overflow-hidden">
+                <ActivityBar />
                 <Sidebar />
 
                 <div className="flex-1 flex flex-col overflow-hidden">
                     {activeView === "explorer" ? (
-                        <>
+                        <div className="flex-1 flex flex-col overflow-hidden">
                             <TabBar />
                             <div className="flex-1 relative overflow-hidden bg-background">
                                 {tabs.length > 0 ? (
@@ -225,16 +227,15 @@ export const MainLayout = () => {
                                             )}
                                         >
                                             {tab.type === "explorer" && <FilePanel tabId={tab.id} />}
-                                            {tab.type === "duplicates" && <DuplicateTab tabId={tab.id} />}
                                         </div>
                                     ))
                                 ) : (
                                     <WelcomePage />
                                 )}
                             </div>
-                        </>
+                        </div>
                     ) : (
-                        <div className="flex-1 p-4 overflow-hidden bg-background">
+                        <div className="flex-1 overflow-hidden bg-background relative flex flex-col">
                             {activeView === "dedupe" && <DuplicateTab tabId="dedupe-service" />}
                             {activeView === "content_search" && <ContentTypeTab tabId="content-search-service" />}
                             {activeView === "clean" && <CleanTab tabId="clean" />}

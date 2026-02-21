@@ -45,6 +45,14 @@ pub async fn read_dir_chunked(
         return Err(format!("Failed to read directory: {}", e));
     }
 
+    struct PartialEntry {
+        name: String,
+        path: String,
+        is_dir: bool,
+        extension: Option<String>,
+        entry: fs::DirEntry,
+    }
+
     let mut all_entries = Vec::new();
     for entry in entries_result.unwrap() {
         if all_entries.len() >= MAX_DIR_ENTRIES {
@@ -67,43 +75,93 @@ pub async fn read_dir_chunked(
             .path()
             .extension()
             .map(|e| e.to_string_lossy().to_string().to_lowercase());
+        
         if let Some(ref ext) = extension {
             if settings.blocked_extensions.contains(ext) {
                 continue;
             }
         }
 
-        let metadata = entry.metadata().ok();
-        let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-        let size = if is_dir {
-            None
-        } else {
-            metadata.as_ref().map(|m| m.len())
-        };
-        let modified = metadata
-            .as_ref()
-            .and_then(|m| m.modified().ok())
-            .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs());
+        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        let path_str = entry.path().to_string_lossy().into_owned();
 
-        let path_buf = entry.path();
-        let path_str = path_buf.to_string_lossy().into_owned();
-        // Avoid canonicalize() per entry — very expensive on large dirs; use path as-is for listing.
-        let canonical_path = path_str.clone();
-
-        all_entries.push(FileEntry {
+        all_entries.push(PartialEntry {
             name,
             path: path_str,
-            canonical_path,
             is_dir,
-            size,
-            modified,
             extension,
+            entry,
         });
     }
 
     // Sorting
-    all_entries.sort_by(|a, b| {
+    // If sorting by size or modified, we're forced to fetch metadata for everyone upfront.
+    // Oh well, this is unavoidable if the user explicitly switches the sort.
+    let needs_full_metadata = sort_by == "size" || sort_by == "modified";
+    
+    // Convert to the final struct if needed for sorting, or map later. Let's build full entries where needed.
+    let mut resolved_entries: Vec<FileEntry> = if needs_full_metadata {
+        all_entries.into_iter().map(|p| {
+            let metadata = p.entry.metadata().ok();
+            let size = if p.is_dir { None } else { metadata.as_ref().map(|m| m.len()) };
+            let modified = metadata
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs());
+            FileEntry {
+                name: p.name,
+                path: p.path.clone(),
+                canonical_path: p.path,
+                is_dir: p.is_dir,
+                size,
+                modified,
+                extension: p.extension,
+            }
+        }).collect()
+    } else {
+        // Fast path: Just sorting by name. We just sort the PartialEntries.
+        all_entries.sort_by(|a, b| {
+            let cmp = a.name.to_lowercase().cmp(&b.name.to_lowercase());
+            if order == "desc" { cmp.reverse() } else { cmp }
+        });
+
+        let total = all_entries.len();
+        let end = (offset + limit).min(total);
+        let has_more = end < total || total >= MAX_DIR_ENTRIES;
+
+        let chunk = if offset < total {
+            all_entries[offset..end].iter().map(|p| {
+                let metadata = p.entry.metadata().ok();
+                let size = if p.is_dir { None } else { metadata.as_ref().map(|m| m.len()) };
+                let modified = metadata
+                    .as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs());
+                FileEntry {
+                    name: p.name.clone(),
+                    path: p.path.clone(),
+                    canonical_path: p.path.clone(),
+                    is_dir: p.is_dir,
+                    size,
+                    modified,
+                    extension: p.extension.clone(),
+                }
+            }).collect()
+        } else {
+            Vec::new()
+        };
+
+        return Ok(DirectoryResponse {
+            entries: chunk,
+            total,
+            has_more,
+        });
+    };
+
+    // Slow path sorting branch (if 'size' or 'modified' was selected)
+    resolved_entries.sort_by(|a, b| {
         let cmp = match sort_by.as_str() {
             "size" => a.size.unwrap_or(0).cmp(&b.size.unwrap_or(0)),
             "modified" => a.modified.unwrap_or(0).cmp(&b.modified.unwrap_or(0)),
@@ -117,12 +175,12 @@ pub async fn read_dir_chunked(
         }
     });
 
-    let total = all_entries.len();
+    let total = resolved_entries.len();
     let end = (offset + limit).min(total);
     let has_more = end < total || total >= MAX_DIR_ENTRIES;
     
     let chunk = if offset < total {
-        all_entries[offset..end].to_vec()
+        resolved_entries[offset..end].to_vec()
     } else {
         Vec::new()
     };

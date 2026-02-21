@@ -7,7 +7,6 @@ import {
     Search,
     Trash2,
     RefreshCcw,
-    AlertTriangle,
     FolderPlus,
     FolderOpen,
     Loader2,
@@ -16,7 +15,6 @@ import {
     Eraser,
     CheckSquare,
     Square,
-    ChevronRight,
     FileQuestion
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -64,107 +62,107 @@ export const CleanTab = ({ tabId: _tabId }: CleanTabProps) => {
     return (
         <div className="flex h-full bg-background border rounded-md overflow-hidden transition-colors">
             <div className="flex-1 flex flex-col min-w-0">
-                <div className="bg-muted/50 p-6 border-b">
-                    <div className="flex items-center justify-between mb-6">
-                        <div>
-                            <h2 className="text-2xl font-bold tracking-tight text-foreground">Clean View</h2>
-                            <p className="text-sm text-muted-foreground mt-1">
-                                Find and delete recursive empty folders to keep your filesystem organized.
-                            </p>
+                <div className="bg-muted/50 p-4 border-b flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-primary/10 text-primary rounded-lg">
+                                <Eraser className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <h2 className="text-sm font-bold tracking-tight text-foreground">Clean View</h2>
+                                <p className="text-[11px] text-muted-foreground">Find and delete recursive empty folders to keep your filesystem organized</p>
+                            </div>
                         </div>
+
                         <div className="flex items-center gap-2">
                             {findings.length > 0 && !scanning && (
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    className="h-9 px-4"
+                                    className="h-8 px-3 text-xs"
                                     onClick={() => resetScan()}
                                 >
-                                    <RefreshCcw className="w-4 h-4 mr-2" />
+                                    <RefreshCcw className="w-3.5 h-3.5 mr-1.5" />
                                     New Scan
                                 </Button>
                             )}
                             <Button
                                 disabled={scanning || scanQueue.length === 0}
-                                className="h-9 px-6 bg-primary text-primary-foreground font-bold shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                                className="h-8 px-4 text-xs bg-primary text-primary-foreground font-bold shadow-sm hover:scale-[1.02] active:scale-[0.98] transition-all"
                                 onClick={() => startScan()}
                             >
-                                {scanning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Search className="w-4 h-4 mr-2" />}
-                                {scanning ? "Scanning..." : "Start Scan"}
+                                {scanning ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Search className="w-3.5 h-3.5 mr-1.5" />}
+                                {scanning ? "Scanning..." : "Scan"}
                             </Button>
                         </div>
                     </div>
 
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Included Folders</h3>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 text-[10px] gap-1 text-primary hover:bg-primary/10"
-                                onClick={async () => {
-                                    try {
-                                        const selected = await open({
-                                            directory: true,
-                                            multiple: true,
-                                            title: "Select Folders to Scan"
-                                        });
-                                        if (selected) {
-                                            const items = Array.isArray(selected) ? selected : [selected];
-                                            items.forEach(p => {
-                                                if (p) addToQueue(typeof p === 'string' ? p : (p as any).path);
-                                            });
-                                        }
-                                    } catch (err) {
-                                        console.error("Failed to add folders:", err);
-                                    }
-                                }}
-                            >
-                                <FolderPlus className="w-3 h-3" />
-                                Add Folders
-                            </Button>
+                    <div className="flex items-center gap-3 bg-background border rounded-lg p-1.5 shadow-sm">
+                        <div className="flex items-center gap-1.5 px-2 border-r text-muted-foreground shrink-0">
+                            <FolderPlus className="w-3.5 h-3.5" />
+                            <span className="text-[11px] font-semibold uppercase tracking-wider">Folders</span>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                            {scanQueue.map(path => (
-                                <div key={path} className="group flex items-center gap-2 bg-background border px-3 py-1.5 rounded-lg text-xs font-medium shadow-sm hover:border-primary/50 transition-colors">
-                                    <ChevronRight className="w-3 h-3 text-primary" />
-                                    <span className="max-w-[200px] truncate lowercase">{path}</span>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-4 w-4 ml-1 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive hover:text-destructive-foreground rounded-sm"
-                                        onClick={() => removeFromQueue(path)}
-                                    >
-                                        <X className="w-2.5 h-2.5" />
-                                    </Button>
-                                </div>
-                            ))}
-                            {scanQueue.length === 0 && (
-                                <div className="flex items-center gap-2 text-destructive text-xs font-medium bg-destructive/10 px-3 py-1.5 rounded-lg border border-destructive/20 animate-pulse">
-                                    <AlertTriangle className="w-3 h-3" />
-                                    Select folders from the sidebar or click "Add Folders" to start.
-                                </div>
+                        <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+                            {scanQueue.length === 0 ? (
+                                <span className="text-[11px] text-destructive/80 font-medium animate-pulse px-1">None selected</span>
+                            ) : (
+                                scanQueue.map(path => (
+                                    <div key={path} className="group flex items-center gap-1.5 bg-background border shadow-sm px-2.5 py-1 rounded-md text-[11px] font-medium hover:border-primary/40 hover:bg-primary/5 transition-all max-w-[200px]">
+                                        <FolderOpen className="w-3.5 h-3.5 text-primary/70 shrink-0" />
+                                        <span className="truncate" title={path}>{path.split(/[/\\]/).pop() || path}</span>
+                                        <button
+                                            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive rounded-sm ml-0.5 shrink-0"
+                                            onClick={() => removeFromQueue(path)}
+                                        >
+                                            <X className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                ))
                             )}
                         </div>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-3 text-xs gap-1.5 text-primary hover:bg-primary/10 shrink-0"
+                            onClick={() => {
+                                open({
+                                    directory: true,
+                                    multiple: true,
+                                    title: "Select Folders to Scan"
+                                }).then(selected => {
+                                    if (selected) {
+                                        const items = Array.isArray(selected) ? selected : [selected];
+                                        items.forEach(p => {
+                                            if (p) addToQueue(typeof p === 'string' ? p : (p as any).path);
+                                        });
+                                    }
+                                }).catch(err => {
+                                    console.error("Failed to add folders:", err);
+                                });
+                            }}
+                        >
+                            <FolderPlus className="w-3.5 h-3.5" />
+                            Add Folder
+                        </Button>
                     </div>
                 </div>
 
                 {scanning && progress && (
-                    <div className="p-8 border-b bg-primary/5 space-y-4">
+                    <div className="p-4 border-b bg-primary/5 space-y-3">
                         <div className="flex justify-between items-end mb-1">
                             <div className="space-y-1">
                                 <div className="text-[10px] font-bold uppercase tracking-widest text-primary">{progress.status}</div>
-                                <div className="text-sm font-medium max-w-md truncate text-muted-foreground">{progress.current_path}</div>
+                                <div className="text-xs font-medium max-w-md truncate text-muted-foreground">{progress.current_path}</div>
                             </div>
                             <div className="text-right">
-                                <div className="text-2xl font-bold tracking-tighter text-foreground">{progress.scanned_folders}</div>
-                                <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Folders Reviewed</div>
+                                <div className="text-xl font-bold tracking-tighter text-foreground">{progress.scanned_folders}</div>
+                                <div className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50">Folders Reviewed</div>
                             </div>
                         </div>
                         <Progress value={0} className="h-1.5 w-full bg-secondary overflow-hidden">
                             <div className="h-full bg-primary animate-progress-indeterminate origin-left w-1/3" />
                         </Progress>
-                        <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-muted-foreground/40">
+                        <div className="flex justify-between text-[9px] font-bold uppercase tracking-widest text-muted-foreground/40">
                             <div className="flex items-center gap-4">
                                 <span>Analyzing folder hierarchy...</span>
                                 <span className="flex items-center gap-1.5 text-primary/60">
@@ -179,39 +177,39 @@ export const CleanTab = ({ tabId: _tabId }: CleanTabProps) => {
 
                 {!scanning && findings.length > 0 && (
                     <div className="flex-1 flex flex-col overflow-hidden">
-                        <div className="bg-muted/30 px-6 py-3 border-b flex items-center justify-between">
-                            <div className="flex items-center gap-4">
+                        <div className="bg-muted/30 px-4 py-2 border-b flex items-center justify-between">
+                            <div className="flex items-center gap-3">
                                 <Button
                                     variant="ghost"
                                     size="sm"
-                                    className="h-8 text-xs font-bold gap-2 hover:bg-primary/10 hover:text-primary transition-colors"
+                                    className="h-7 px-2 text-[11px] font-medium gap-1.5 hover:bg-primary/10 hover:text-primary transition-colors"
                                     onClick={selectAll}
                                 >
-                                    <CheckSquare className="w-4 h-4" />
+                                    <CheckSquare className="w-3.5 h-3.5" />
                                     Select All
                                 </Button>
                                 <Button
                                     variant="ghost"
                                     size="sm"
-                                    className="h-8 text-xs font-bold gap-2 text-muted-foreground hover:bg-primary/5 transition-colors"
+                                    className="h-7 px-2 text-[11px] font-medium gap-1.5 text-muted-foreground hover:bg-primary/5 transition-colors"
                                     onClick={selectNone}
                                 >
-                                    <Square className="w-4 h-4" />
+                                    <Square className="w-3.5 h-3.5" />
                                     Deselect All
                                 </Button>
-                                <div className="h-8 w-[1px] bg-border mx-2" />
+                                <div className="h-6 w-[1px] bg-border mx-1" />
                                 <span className="text-xs font-bold text-muted-foreground">
-                                    {selectedPaths.size} folders selected for deletion
+                                    {selectedPaths.size} folders selected
                                 </span>
                             </div>
                             <Button
                                 variant="destructive"
                                 size="sm"
-                                className="h-8 font-bold shadow-lg shadow-destructive/20"
+                                className="h-7 px-2.5 text-[11px] font-medium shadow-sm shadow-destructive/20"
                                 disabled={selectedPaths.size === 0}
                                 onClick={deleteSelected}
                             >
-                                <Trash2 className="w-3.5 h-3.5 mr-2" />
+                                <Trash2 className="w-3.5 h-3.5 mr-1" />
                                 Delete Empty Folders
                             </Button>
                         </div>
@@ -237,7 +235,7 @@ export const CleanTab = ({ tabId: _tabId }: CleanTabProps) => {
                                         >
                                             <div
                                                 className={cn(
-                                                    "flex items-center gap-4 px-4 py-3 border rounded-xl transition-all cursor-pointer group",
+                                                    "flex items-center gap-3 px-3 py-2 border rounded-lg transition-all cursor-pointer group",
                                                     selectedPaths.has(folder.path) ? "bg-destructive/5 border-destructive/20" : "hover:bg-accent hover:border-accent-foreground/10 bg-muted/5"
                                                 )}
                                                 onClick={() => toggleSelection(folder.path)}
@@ -245,25 +243,26 @@ export const CleanTab = ({ tabId: _tabId }: CleanTabProps) => {
                                                 <Checkbox
                                                     checked={selectedPaths.has(folder.path)}
                                                     onCheckedChange={() => toggleSelection(folder.path)}
-                                                    className="data-[state=checked]:bg-destructive data-[state=checked]:border-destructive"
+                                                    className="data-[state=checked]:bg-destructive data-[state=checked]:border-destructive w-3.5 h-3.5"
+                                                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                                 />
                                                 <div className="p-1.5 bg-background rounded-md border shadow-sm group-hover:scale-110 transition-transform">
-                                                    <FileQuestion className="w-4 h-4 text-orange-500" />
+                                                    <FileQuestion className="w-3.5 h-3.5 text-orange-500" />
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="text-sm font-bold truncate group-hover:text-primary transition-colors">{folder.name}</div>
-                                                    <div className="text-[10px] text-muted-foreground truncate opacity-60 font-mono tracking-tighter">{folder.path}</div>
+                                                    <div className="text-[11px] font-bold truncate group-hover:text-primary transition-colors">{folder.name}</div>
+                                                    <div className="text-[9px] text-muted-foreground truncate opacity-60 font-mono tracking-tighter mt-0.5">{folder.path}</div>
                                                 </div>
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
-                                                    className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                    className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         invoke("show_in_finder", { path: folder.path });
                                                     }}
                                                 >
-                                                    <FolderOpen className="w-4 h-4" />
+                                                    <FolderOpen className="w-3.5 h-3.5" />
                                                 </Button>
                                             </div>
                                         </div>

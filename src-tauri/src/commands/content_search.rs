@@ -9,6 +9,7 @@ use tauri::{Emitter, Runtime};
 
 use super::settings::ConfigSection;
 use super::dedupe::ProgressEvent;
+use crate::utils::file_types::{get_file_category, is_category_enabled, FileCategory};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ContentGroup {
@@ -90,28 +91,19 @@ pub async fn find_content_by_category<R: Runtime>(
                 continue;
             }
 
-            let category = match extension.as_str() {
-                "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" => {
-                    if settings.preview_enabled.image { Some("Images") } else { None }
-                },
-                "mp4" | "mkv" | "mov" | "avi" | "webm" => {
-                    if settings.preview_enabled.video { Some("Videos") } else { None }
-                },
-                "mp3" | "wav" | "ogg" | "flac" | "m4a" => {
-                    if settings.preview_enabled.audio { Some("Audio") } else { None }
-                },
-                "txt" | "md" | "js" | "ts" | "py" | "rs" | "json" => {
-                    if settings.preview_enabled.text { Some("Documents") } else { None }
-                },
-                "pdf" => {
-                    if settings.preview_enabled.pdf { Some("PDFs") } else { None }
-                },
-                "zip" | "rar" | "7z" | "tar" | "gz" => {
-                    if settings.preview_enabled.archive { Some("Archives") } else { None }
-                },
-                _ => {
-                    if settings.preview_enabled.other { Some("Other") } else { None }
-                },
+            let file_cat = get_file_category(&extension);
+            if !is_category_enabled(file_cat, &settings) {
+                continue;
+            }
+
+            let category = match file_cat {
+                FileCategory::Image => Some("Images"),
+                FileCategory::Video => Some("Videos"),
+                FileCategory::Audio => Some("Audio"),
+                FileCategory::Text => Some("Text"),
+                FileCategory::Document => Some("Documents"),
+                FileCategory::Archive => Some("Archives"),
+                FileCategory::Other => Some("Other"),
             };
 
             if let Some(cat) = category {

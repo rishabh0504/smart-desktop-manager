@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button";
 import {
     ContextMenu,
     ContextMenuContent,
@@ -19,14 +18,12 @@ import {
     ChevronRight,
     CopyCheck,
     Download,
-    FileSearch,
     Files,
     Film,
     FolderHeart,
     HardDrive,
     Home,
     Image as ImageIcon,
-    LayoutGrid,
     Monitor,
     Music,
     Star,
@@ -41,8 +38,6 @@ import { homeDir } from "@tauri-apps/api/path";
 
 export const Sidebar = () => {
     const { volumes, favorites, isCollapsed, refreshVolumes } = useSidebarStore();
-    const activeView = useExplorerStore(state => state.activeView);
-    const setActiveView = useExplorerStore(state => state.setActiveView);
     const { settings } = useSettingsStore();
     const [homePath, setHomePath] = useState<string>("");
 
@@ -153,56 +148,6 @@ export const Sidebar = () => {
                 </div>
             </ScrollArea>
 
-            <div className="p-3 border-t bg-muted/10 space-y-1">
-                <Button
-                    variant={activeView === "explorer" ? "secondary" : "ghost"}
-                    size="sm"
-                    className={cn(
-                        "w-full justify-start gap-2 text-xs h-9 transition-all",
-                        activeView === "explorer" && "font-bold text-primary shadow-sm"
-                    )}
-                    onClick={() => setActiveView("explorer")}
-                >
-                    <LayoutGrid className="w-4 h-4" />
-                    Explorer
-                </Button>
-                <Button
-                    variant={activeView === "dedupe" ? "secondary" : "ghost"}
-                    size="sm"
-                    className={cn(
-                        "w-full justify-start gap-2 text-xs h-9 transition-all",
-                        activeView === "dedupe" && "font-bold text-primary shadow-sm"
-                    )}
-                    onClick={() => setActiveView("dedupe")}
-                >
-                    <CopyCheck className="w-4 h-4" />
-                    Duplicate Finder
-                </Button>
-                <Button
-                    variant={activeView === "content_search" ? "secondary" : "ghost"}
-                    size="sm"
-                    className={cn(
-                        "w-full justify-start gap-2 text-xs h-9 transition-all",
-                        activeView === "content_search" && "font-bold text-primary shadow-sm"
-                    )}
-                    onClick={() => setActiveView("content_search")}
-                >
-                    <FileSearch className="w-4 h-4" />
-                    Content Search
-                </Button>
-                <Button
-                    variant={activeView === "clean" ? "secondary" : "ghost"}
-                    size="sm"
-                    className={cn(
-                        "w-full justify-start gap-2 text-xs h-9 transition-all",
-                        activeView === "clean" && "font-bold text-primary shadow-sm"
-                    )}
-                    onClick={() => setActiveView("clean")}
-                >
-                    <Eraser className="w-4 h-4" />
-                    Clean View
-                </Button>
-            </div>
         </div>
     );
 };

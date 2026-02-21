@@ -23,7 +23,7 @@ const DEFAULT_CONFIG: ConfigSection = {
         video: true,
         audio: true,
         text: true,
-        pdf: true,
+        document: true,
         archive: false,
         other: true,
     },

@@ -1,8 +1,8 @@
-import { Music, FileQuestion, Loader2 } from "lucide-react";
+import { Music, FileQuestion, Loader2, FileText } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
-import { isVideoExtension } from "@/lib/fileTypes";
+import { isVideoExtension, isImageExtension, isAudioExtension, isTextExtension, isDocumentExtension } from "@/lib/fileTypes";
 import { useSettingsStore } from "@/stores/settingsStore";
 
 interface FilePreviewContentProps {
@@ -44,14 +44,14 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
     const settings = useSettingsStore((state) => state.settings[section]);
     const previewSettings = settings.preview_enabled;
 
-    const ext = extension.toLowerCase();
-    const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext) && previewSettings.image;
+    const ext = extension.toLowerCase().replace(/^\./, '');
+    const isImage = isImageExtension(ext) && previewSettings.image;
     const isVideo = isVideoExtension(ext) && previewSettings.video;
-    const isAudio = ["mp3", "wav", "ogg", "flac"].includes(ext) && previewSettings.audio;
-    const isText = ["txt", "md", "js", "ts", "json", "rs", "css", "html", "py", "sh", "yml", "yaml"].includes(ext) && previewSettings.text;
-    const isPdf = ext === "pdf" && previewSettings.pdf;
+    const isAudio = isAudioExtension(ext) && previewSettings.audio;
+    const isText = isTextExtension(ext) && previewSettings.text;
+    const isDocument = isDocumentExtension(ext) && previewSettings.document;
 
-    const isPreviewEnabled = isImage || isVideo || isAudio || isText || isPdf;
+    const isPreviewEnabled = isImage || isVideo || isAudio || isText || isDocument;
 
     useEffect(() => {
         if (!path) {
@@ -78,7 +78,7 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
                     setContent(null);
                 })
                 .finally(() => setLoading(false));
-        } else if (isPdf) {
+        } else if (isDocument && ext === "pdf") {
             invoke<string>("get_file_base64_content", { path })
                 .then((c) => { setContent(c); setPreviewError(null); })
                 .catch((err: any) => {
@@ -93,7 +93,7 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
         } else {
             setLoading(false);
         }
-    }, [path, isText, isPdf, isImage, isVideo, isAudio, isPreviewEnabled]);
+    }, [path, isText, isDocument, isImage, isVideo, isAudio, isPreviewEnabled, ext]);
 
     if (!isPreviewEnabled) {
         return (
@@ -151,12 +151,24 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
                 </div>
             )}
 
-            {isPdf && content && !previewError && (
+            {isDocument && ext === "pdf" && content && !previewError && (
                 <embed
                     src={content}
                     type="application/pdf"
                     className="w-full h-full rounded-sm shadow-xl"
                 />
+            )}
+
+            {isDocument && ext !== "pdf" && (
+                <div className="flex flex-col items-center justify-center gap-4 text-muted-foreground bg-muted/10 p-12 rounded-2xl border border-dashed text-center">
+                    <FileText className="w-16 h-16 opacity-30" />
+                    <div className="space-y-1">
+                        <p className="text-sm font-bold">Document Preview Placeholder</p>
+                        <p className="text-[10px] opacity-60 max-w-[200px]">
+                            Full preview for {extension.toUpperCase()} is not yet available, but it is correctly categorized.
+                        </p>
+                    </div>
+                </div>
             )}
         </div>
     );

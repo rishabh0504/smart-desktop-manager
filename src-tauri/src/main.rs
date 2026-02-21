@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod utils;
 
 use commands::dir::{read_dir_chunked, create_folder, create_file, rename_item};
 use commands::copy::start_copy;

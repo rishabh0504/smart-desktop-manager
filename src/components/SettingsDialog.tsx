@@ -118,10 +118,12 @@ export const SettingsDialog = ({ open, onOpenChange }: SettingsDialogProps) => {
                     </DialogHeader>
 
                     <div className="flex-1 overflow-y-auto px-6 py-4 space-y-8">
-                        {activeSection !== "appearance" ? (
-                            <ConfigSectionView section={activeSection as any} />
-                        ) : (
+                        {activeSection === "explorer" || activeSection === "dedupe" || activeSection === "content_search" ? (
+                            <ConfigSectionView section={activeSection} />
+                        ) : activeSection === "appearance" ? (
                             <AppearanceSectionView />
+                        ) : (
+                            <CleanViewPlaceholder />
                         )}
 
                         {activeSection === "explorer" && (
@@ -251,10 +253,10 @@ const ConfigSectionView = ({ section }: { section: "explorer" | "dedupe" | "cont
                         onClick={() => updatePreviewSettings(section, { text: !settings.preview_enabled.text })}
                     />
                     <PreviewToggle
-                        label="PDF"
-                        icon={<FileSearch className="w-4 h-4" />}
-                        active={settings.preview_enabled.pdf}
-                        onClick={() => updatePreviewSettings(section, { pdf: !settings.preview_enabled.pdf })}
+                        label="Documents"
+                        icon={<FileText className="w-4 h-4" />}
+                        active={settings.preview_enabled.document}
+                        onClick={() => updatePreviewSettings(section, { document: !settings.preview_enabled.document })}
                     />
                     <PreviewToggle
                         label="Archives"
@@ -474,3 +476,15 @@ const AppearanceSectionView = () => {
         </div>
     );
 };
+
+const CleanViewPlaceholder = () => (
+    <div className="flex flex-col items-center justify-center h-full py-12 text-center opacity-40">
+        <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
+            <Eraser className="w-8 h-8" />
+        </div>
+        <h3 className="text-sm font-bold">No Config Required</h3>
+        <p className="text-[10px] text-muted-foreground max-w-[200px] mt-1">
+            Clean View currently focuses on identifying empty folders and doesn't require specific filtering settings.
+        </p>
+    </div>
+);

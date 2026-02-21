@@ -89,30 +89,30 @@ for MODEL in "${REQUIRED_MODELS[@]}"; do
 done
 
 # 5. Whisper Transcription via whisper.cpp
-echo "STEP 4: Optional Transcription Setup (whisper.cpp)"
+# echo "STEP 4: Optional Transcription Setup (whisper.cpp)"
 
-WHISPER_CPP_BIN="/usr/local/bin/whisper.cpp"
+# WHISPER_CPP_BIN="/usr/local/bin/whisper.cpp"
 
-if command -v whisper.cpp >/dev/null 2>&1 || [[ -f "$WHISPER_CPP_BIN" ]]; then
-    echo "✅ whisper.cpp already available"
-else
-    echo "⬇️ Installing whisper.cpp transcription tool"
+# if command -v whisper.cpp >/dev/null 2>&1 || [[ -f "$WHISPER_CPP_BIN" ]]; then
+#     echo "✅ whisper.cpp already available"
+# else
+#     echo "⬇️ Installing whisper.cpp transcription tool"
 
-    TMP_DIR=$(mktemp -d /tmp/whispercpp.XXXX)
-    git clone https://github.com/ggerganov/whisper.cpp "$TMP_DIR"
-    cd "$TMP_DIR"
-    make
+#     TMP_DIR=$(mktemp -d /tmp/whispercpp.XXXX)
+#     git clone https://github.com/ggerganov/whisper.cpp "$TMP_DIR"
+#     cd "$TMP_DIR"
+#     make
 
-    if [[ -f ./main ]]; then
-        mv ./main /usr/local/bin/whisper.cpp
-        echo "✅ whisper.cpp installed"
-    else
-        echo "⚠️ whisper.cpp build failed — continuing without it"
-    fi
+#     if [[ -f ./main ]]; then
+#         mv ./main /usr/local/bin/whisper.cpp
+#         echo "✅ whisper.cpp installed"
+#     else
+#         echo "⚠️ whisper.cpp build failed — continuing without it"
+#     fi
 
-    cd -
-    rm -rf "$TMP_DIR"
-fi
+#     cd -
+#     rm -rf "$TMP_DIR"
+# fi
 
 # 6. Finalization
 echo "STEP 5: Finalizing Installation"
