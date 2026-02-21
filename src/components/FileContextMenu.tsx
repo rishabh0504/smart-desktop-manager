@@ -1,4 +1,8 @@
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger } from "@/components/ui/context-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { useState } from "react";
 import { FileEntry } from "@/types/explorer";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { usePreviewStore } from "@/stores/previewStore";
@@ -24,6 +28,14 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
     const addToDeleteQueue = useDeleteQueueStore((state) => state.addToQueue);
     const { queues, addQueue: addMoveQueue, addToQueue: addToMoveQueue, updateQueue } = useMoveQueueStore();
     const setActiveView = useExplorerStore((state) => state.setActiveView);
+    const currentTab = useExplorerStore((state) => state.tabs.find(t => t.id === tabId));
+
+    const [isRenameOpen, setIsRenameOpen] = useState(false);
+    const [renameInput, setRenameInput] = useState("");
+    const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
+    const [newFolderInput, setNewFolderInput] = useState("");
+
+    const existingNames = currentTab?.entries.map(e => e.name.toLowerCase()) || [];
 
     const handleOpen = () => {
         if (entry.is_dir) {
@@ -100,32 +112,63 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
         alert(`Name: ${entry.name}\nType: ${entry.extension || "Folder"}\nSize: ${size}\nModified: ${date}\nPath: ${entry.path}`);
     };
 
-    const handleRename = async () => {
-        const newName = window.prompt("Enter new name:", entry.name);
-        if (!newName || newName === entry.name) return;
+    const handleRename = () => {
+        setRenameInput(entry.name);
+        setIsRenameOpen(true);
+    };
+
+    const confirmRename = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        const newName = renameInput.trim();
+        if (!newName || newName === entry.name) {
+            setIsRenameOpen(false);
+            return;
+        }
+
+        if (existingNames.includes(newName.toLowerCase())) {
+            toast.error("An item with this name already exists in this folder");
+            return;
+        }
 
         try {
             await invoke("rename_item", { path: entry.path, newName });
             toast.success("Renamed successfully");
+            setIsRenameOpen(false);
             refresh(tabId);
         } catch (error) {
             toast.error(`Rename failed: ${error}`);
         }
     };
 
-    const handleNewFolder = async () => {
-        const folderName = window.prompt("Enter folder name:", "New Folder");
-        if (!folderName) return;
+    const handleNewFolder = () => {
+        setNewFolderInput("New Folder");
+        setIsNewFolderOpen(true);
+    };
+
+    const confirmNewFolder = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        const folderName = newFolderInput.trim();
+        if (!folderName) {
+            setIsNewFolderOpen(false);
+            return;
+        }
+
+        if (existingNames.includes(folderName.toLowerCase())) {
+            toast.error("A folder with this name already exists in this directory");
+            return;
+        }
 
         try {
-            const currentPath = useExplorerStore.getState().tabs.find(t => t.id === tabId)?.path;
+            const currentPath = currentTab?.path;
             if (!currentPath) return;
 
-            const separator = currentPath.endsWith('/') ? '' : '/';
+            const separator = currentPath.endsWith('/') || currentPath.endsWith('\\') ? '' : '/';
             const path = `${currentPath}${separator}${folderName}`;
 
             await invoke("create_folder", { path });
             toast.success("Folder created");
+            setIsNewFolderOpen(false);
+            setNewFolderInput("");
             refresh(tabId);
         } catch (error) {
             toast.error(`Create folder failed: ${error}`);
@@ -133,58 +176,113 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
     };
 
     return (
-        <ContextMenu>
-            <ContextMenuTrigger>{children}</ContextMenuTrigger>
-            <ContextMenuContent className="w-48 text-xs [&_button]:text-xs">
-                <ContextMenuItem onClick={handleOpen} className="text-xs">Open</ContextMenuItem>
-                {entry.is_dir && (
-                    <ContextMenuItem onClick={handleAddToDedupe} className="text-xs">
-                        <CopyCheck className="w-3.5 h-3.5 mr-2" /> Find duplicates
-                    </ContextMenuItem>
-                )}
-                {entry.is_dir && (
+        <>
+            <ContextMenu>
+                <ContextMenuTrigger>{children}</ContextMenuTrigger>
+                <ContextMenuContent className="w-48 text-xs [&_button]:text-xs">
+                    <ContextMenuItem onClick={handleOpen} className="text-xs">Open</ContextMenuItem>
+                    {entry.is_dir && (
+                        <ContextMenuItem onClick={handleAddToDedupe} className="text-xs">
+                            <CopyCheck className="w-3.5 h-3.5 mr-2" /> Find duplicates
+                        </ContextMenuItem>
+                    )}
+                    {entry.is_dir && (
+                        <ContextMenuSub>
+                            <ContextMenuSubTrigger className="text-xs">
+                                <FolderInput className="w-3.5 h-3.5 mr-2" /> Add to move destination
+                            </ContextMenuSubTrigger>
+                            <ContextMenuSubContent className="text-xs [&_button]:text-xs">
+                                <ContextMenuItem onClick={() => handleUseFolderAsDestination()} className="text-xs">Create New Queue...</ContextMenuItem>
+                                {queues.map((q) => (
+                                    <ContextMenuItem key={q.id} onClick={() => handleUseFolderAsDestination(q.id)} className="text-xs">Queue: {q.name}</ContextMenuItem>
+                                ))}
+                            </ContextMenuSubContent>
+                        </ContextMenuSub>
+                    )}
                     <ContextMenuSub>
                         <ContextMenuSubTrigger className="text-xs">
-                            <FolderInput className="w-3.5 h-3.5 mr-2" /> Use as move destination
+                            <FolderInput className="w-3.5 h-3.5 mr-2" /> Add to move queue
                         </ContextMenuSubTrigger>
                         <ContextMenuSubContent className="text-xs [&_button]:text-xs">
-                            <ContextMenuItem onClick={() => handleUseFolderAsDestination()} className="text-xs">New queue</ContextMenuItem>
-                            {queues.map((q) => (
-                                <ContextMenuItem key={q.id} onClick={() => handleUseFolderAsDestination(q.id)} className="text-xs">Set for {q.name}</ContextMenuItem>
-                            ))}
+                            {queues.length === 0 ? (
+                                <ContextMenuItem disabled className="text-xs">No queues</ContextMenuItem>
+                            ) : (
+                                queues.map((q) => (
+                                    <ContextMenuItem key={q.id} onClick={() => handleAddEntryToMoveQueue(q.id)} className="text-xs">{q.name} ({q.items.length})</ContextMenuItem>
+                                ))
+                            )}
                         </ContextMenuSubContent>
                     </ContextMenuSub>
-                )}
-                <ContextMenuSub>
-                    <ContextMenuSubTrigger className="text-xs">
-                        <FolderInput className="w-3.5 h-3.5 mr-2" /> Add to move queue
-                    </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="text-xs [&_button]:text-xs">
-                        {queues.length === 0 ? (
-                            <ContextMenuItem disabled className="text-xs">No queues</ContextMenuItem>
-                        ) : (
-                            queues.map((q) => (
-                                <ContextMenuItem key={q.id} onClick={() => handleAddEntryToMoveQueue(q.id)} className="text-xs">{q.name} ({q.items.length})</ContextMenuItem>
-                            ))
-                        )}
-                    </ContextMenuSubContent>
-                </ContextMenuSub>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={handleCopy} className="text-xs">Copy</ContextMenuItem>
-                <ContextMenuItem onClick={handleCut} className="text-xs">Cut</ContextMenuItem>
-                <ContextMenuItem onClick={handleShowInFinder} className="text-xs">Show in Finder</ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={handleRename} className="text-xs"><Pencil className="w-3.5 h-3.5 mr-2" /> Rename</ContextMenuItem>
-                <ContextMenuItem onClick={handleNewFolder} className="text-xs"><FolderPlus className="w-3.5 h-3.5 mr-2" /> New folder</ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={handleAddToDeleteQueue} className="text-xs text-destructive hover:text-destructive">
-                    <Trash2 className="w-3.5 h-3.5 mr-2" /> Add to delete queue
-                </ContextMenuItem>
-                <ContextMenuItem onClick={handleDelete} className="text-xs text-red-500 hover:text-red-600">Delete</ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={handleProperties} className="text-xs">Properties</ContextMenuItem>
-            </ContextMenuContent>
-        </ContextMenu>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={handleCopy} className="text-xs">Copy</ContextMenuItem>
+                    <ContextMenuItem onClick={handleCut} className="text-xs">Cut</ContextMenuItem>
+                    <ContextMenuItem onClick={handleShowInFinder} className="text-xs">Show in Finder</ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={handleRename} className="text-xs"><Pencil className="w-3.5 h-3.5 mr-2" /> Rename</ContextMenuItem>
+                    <ContextMenuItem onClick={handleNewFolder} className="text-xs"><FolderPlus className="w-3.5 h-3.5 mr-2" /> New folder</ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={handleAddToDeleteQueue} className="text-xs text-destructive hover:text-destructive">
+                        <Trash2 className="w-3.5 h-3.5 mr-2" /> Add to delete queue
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={handleDelete} className="text-xs text-red-500 hover:text-red-600">Delete</ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={handleProperties} className="text-xs">Properties</ContextMenuItem>
+                </ContextMenuContent>
+            </ContextMenu>
+
+            <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Rename Item</DialogTitle>
+                        <DialogDescription>
+                            Enter a new name for the selected item.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={confirmRename}>
+                        <div className="flex items-center space-x-2 py-4">
+                            <Input
+                                autoFocus
+                                value={renameInput}
+                                onChange={(e) => setRenameInput(e.target.value)}
+                                placeholder="New name"
+                                className="text-sm"
+                            />
+                        </div>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setIsRenameOpen(false)}>Cancel</Button>
+                            <Button type="submit">Rename</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isNewFolderOpen} onOpenChange={setIsNewFolderOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>New Folder</DialogTitle>
+                        <DialogDescription>
+                            Create a new folder in this directory.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={confirmNewFolder}>
+                        <div className="flex items-center space-x-2 py-4">
+                            <Input
+                                autoFocus
+                                value={newFolderInput}
+                                onChange={(e) => setNewFolderInput(e.target.value)}
+                                placeholder="Folder name"
+                                className="text-sm"
+                                onFocus={(e) => e.target.select()}
+                            />
+                        </div>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setIsNewFolderOpen(false)}>Cancel</Button>
+                            <Button type="submit">Create</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+        </>
     );
 };
 

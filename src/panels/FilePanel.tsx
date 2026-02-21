@@ -8,7 +8,9 @@ import { GridTile } from "./GridTile";
 import { FileRow } from "./FileRow";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { FileContextMenu } from "@/components/FileContextMenu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import {
     ContextMenu,
     ContextMenuContent,
@@ -65,6 +67,11 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
     const parentRef = useRef<HTMLDivElement>(null);
     const loadMoreTriggered = useRef(false);
     const [selectionRect, setSelectionRect] = useState<{ x: number; y: number; width: number; height: number; startX: number; startY: number } | null>(null);
+
+    const [isRenameOpen, setIsRenameOpen] = useState(false);
+    const [renameInput, setRenameInput] = useState("");
+    const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
+    const [newFolderInput, setNewFolderInput] = useState("");
 
     // Don't render until tab exists and has a path
     if (!tab || !tab.path) return null;
@@ -336,40 +343,43 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
         setSelectionRect(null);
     };
 
-    const handleNewFolderInPanel = useCallback(async () => {
-        const currentTab = useExplorerStore.getState().tabs.find((t) => t.id === tabId);
-        const currentPath = currentTab?.path;
-        if (!currentPath) {
-            toast.error("No current folder");
+    const handleNewFolderInPanel = useCallback(() => {
+        setNewFolderInput("New Folder");
+        setIsNewFolderOpen(true);
+    }, []);
+
+    const confirmNewFolderInPanel = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        const folderName = newFolderInput.trim();
+        if (!folderName) {
+            setIsNewFolderOpen(false);
             return;
         }
+
+        const currentTab = useExplorerStore.getState().tabs.find((t) => t.id === tabId);
+        const existingNames = currentTab?.entries.map((en) => en.name.toLowerCase()) || [];
+
+        if (existingNames.includes(folderName.toLowerCase())) {
+            toast.error("A folder with this name already exists in this directory");
+            return;
+        }
+
+        const currentPath = currentTab?.path;
+        if (!currentPath) return;
+
         const base = currentPath.replace(/[/\\]+$/, "");
-        let name = "Untitled folder";
-        let path = `${base}/${name}`;
+        const path = `${base}/${folderName}`;
+
         try {
             await invoke("create_folder", { path });
             toast.success("Folder created");
+            setIsNewFolderOpen(false);
+            setNewFolderInput("");
             refresh(tabId);
         } catch (error) {
-            const errStr = String(error);
-            if (errStr.includes("already exists")) {
-                let n = 2;
-                while (n < 100) {
-                    name = `Untitled folder (${n})`;
-                    path = `${base}/${name}`;
-                    try {
-                        await invoke("create_folder", { path });
-                        toast.success("Folder created");
-                        refresh(tabId);
-                        return;
-                    } catch {
-                        n++;
-                    }
-                }
-            }
             toast.error(`Create folder failed: ${error}`);
         }
-    }, [tabId, refresh]);
+    };
 
     const handlePasteInPanel = useCallback(async () => {
         try {
@@ -384,22 +394,35 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
     const handleShowFolderInFinder = useCallback(() => {
         invoke("show_in_finder", { path: tab.path });
     }, [tab.path]);
-    const handleRenameCurrentFolder = useCallback(async () => {
+    const handleRenameCurrentFolder = useCallback(() => {
         const currentPath = tab.path;
         const currentName = currentPath.split(/[/\\]/).pop() || currentPath;
-        const newName = window.prompt("Enter new folder name:", currentName);
-        if (!newName || newName === currentName) return;
+        setRenameInput(currentName);
+        setIsRenameOpen(true);
+    }, [tab.path]);
+
+    const confirmRenameCurrentFolder = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        const currentPath = tab.path;
+        const currentName = currentPath.split(/[/\\]/).pop() || currentPath;
+        const newName = renameInput.trim();
+
+        if (!newName || newName === currentName) {
+            setIsRenameOpen(false);
+            return;
+        }
+
         try {
             await invoke("rename_item", { path: currentPath, newName });
             toast.success("Folder renamed");
-            // After renaming the current folder, we need to navigate to the new path
+            setIsRenameOpen(false);
             const parent = currentPath.split(/[/\\]/).slice(0, -1).join("/");
             const newPath = `${parent}/${newName}`;
             setPath(tab.id, newPath);
         } catch (error) {
             toast.error(`Rename failed: ${error}`);
         }
-    }, [tab.id, tab.path, setPath]);
+    };
 
     return (
         <div
@@ -625,6 +648,59 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
                     </ContextMenuItem>
                 </ContextMenuContent>
             </ContextMenu>
+
+            <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Rename Folder</DialogTitle>
+                        <DialogDescription>
+                            Enter a new name for the current directory.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={confirmRenameCurrentFolder}>
+                        <div className="flex items-center space-x-2 py-4">
+                            <Input
+                                autoFocus
+                                value={renameInput}
+                                onChange={(e) => setRenameInput(e.target.value)}
+                                placeholder="New folder name"
+                                className="text-sm"
+                            />
+                        </div>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setIsRenameOpen(false)}>Cancel</Button>
+                            <Button type="submit">Rename</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isNewFolderOpen} onOpenChange={setIsNewFolderOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>New Folder</DialogTitle>
+                        <DialogDescription>
+                            Create a new folder in this directory.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={confirmNewFolderInPanel}>
+                        <div className="flex items-center space-x-2 py-4">
+                            <Input
+                                autoFocus
+                                value={newFolderInput}
+                                onChange={(e) => setNewFolderInput(e.target.value)}
+                                placeholder="Folder name"
+                                className="text-sm"
+                                onFocus={(e) => e.target.select()}
+                            />
+                        </div>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setIsNewFolderOpen(false)}>Cancel</Button>
+                            <Button type="submit">Create</Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };
