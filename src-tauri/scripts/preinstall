@@ -15,6 +15,19 @@ echo "SMART DESKTOP MANAGER INSTALLATION STARTED"
 echo "Log File: $LOG_FILE"
 echo "========================================================================"
 
+# 1.5. Launch Live Progress Window via AppleScript
+echo "Launching live progress viewer..."
+osascript -e "
+tell application \"Terminal\"
+    activate
+    do script \"clear && echo '=====================================' && echo '🤖 Smart Desktop Manager Setup' && echo '=====================================' && echo 'Setting up your private AI models securely...' && echo 'This window will close automatically once finished.' && echo '' && tail -f $LOG_FILE\"
+    set customWindow to front window
+    set custom bounds of customWindow to {100, 100, 800, 600}
+    set background color of customWindow to {4000, 4000, 4000}
+    set cursor color of customWindow to {0, 65535, 0}
+    set normal text color of customWindow to {0, 65535, 0}
+end tell" || true
+
 # 2. Environment Audit
 echo "STEP 1: Environment Audit"
 echo "User: $(whoami)"
@@ -125,5 +138,17 @@ chmod 755 "$READY_DIR"
 echo "========================================================================"
 echo "✅ SUCCESS! Installation Complete"
 echo "========================================================================"
+
+# Terminate the tail tracking window that we spooled up
+echo "Closing progress viewer..."
+osascript -e "
+tell application \"Terminal\"
+    set windowList to windows
+    repeat with aWindow in windowList
+        if (name of aWindow) contains \"tail -f\" then
+            close aWindow
+        end if
+    end repeat
+end tell" || true
 
 exit 0
