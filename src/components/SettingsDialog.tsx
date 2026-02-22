@@ -268,33 +268,35 @@ const ConfigSectionView = ({ section }: { section: "explorer" | "dedupe" | "cont
             </section>
 
             {/* Performance Filters */}
-            <section className="space-y-3">
-                <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                    <Trash2 className="w-3 h-3" /> Performance Filters
-                </h3>
-                <div className="flex gap-2 max-w-[300px]">
-                    <Input
-                        placeholder="Ex: iso, tmp, log"
-                        value={newExt}
-                        onChange={(e) => setNewExt(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleAddExt()}
-                        className="h-8 text-xs"
-                    />
-                    <Button size="sm" className="h-8 px-2" onClick={handleAddExt}>
-                        <Plus className="w-4 h-4" />
-                    </Button>
-                </div>
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                    {settings.blocked_extensions.map((ext: string) => (
-                        <div key={ext} className="flex items-center gap-1.5 px-2 py-0.5 bg-muted rounded-full text-[10px] border shadow-sm">
-                            <span>.{ext}</span>
-                            <button onClick={() => removeBlockedExtension(section, ext)} className="hover:text-destructive transition-colors">
-                                <Plus className="w-3 h-3 rotate-45" />
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            </section>
+            {section !== "content_search" && (
+                <section className="space-y-3">
+                    <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                        <Trash2 className="w-3 h-3" /> Performance Filters
+                    </h3>
+                    <div className="flex gap-2 max-w-[300px]">
+                        <Input
+                            placeholder="Ex: iso, tmp, log"
+                            value={newExt}
+                            onChange={(e) => setNewExt(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleAddExt()}
+                            className="h-8 text-xs"
+                        />
+                        <Button size="sm" className="h-8 px-2" onClick={handleAddExt}>
+                            <Plus className="w-4 h-4" />
+                        </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                        {settings.blocked_extensions.map((ext: string) => (
+                            <div key={ext} className="flex items-center gap-1.5 px-2 py-0.5 bg-muted rounded-full text-[10px] border shadow-sm">
+                                <span>.{ext}</span>
+                                <button onClick={() => removeBlockedExtension(section, ext)} className="hover:text-destructive transition-colors">
+                                    <Plus className="w-3 h-3 rotate-45" />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            )}
         </>
     );
 };

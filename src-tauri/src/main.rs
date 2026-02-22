@@ -71,14 +71,28 @@ fn main() {
                     (0, file_size - 1, StatusCode::OK)
                 }
             } else {
-                // Default to first 2MB if no range is requested for large files to avoid OOM
-                let end = std::cmp::min(file_size, 2 * 1024 * 1024) - 1;
-                (0, end, StatusCode::PARTIAL_CONTENT)
+                if mime_type.starts_with("image/") {
+                    // For images without a range request, attempt to load the entire image
+                    // up to a generous limit (e.g., 50MB) and return 200 OK.
+                    let end = std::cmp::min(file_size, 50 * 1024 * 1024) - 1;
+                    (0, end, StatusCode::OK)
+                } else {
+                    // Default to first 2MB if no range is requested for large files to avoid OOM
+                    let end = std::cmp::min(file_size, 2 * 1024 * 1024) - 1;
+                    (0, end, StatusCode::PARTIAL_CONTENT)
+                }
             };
 
             let content_length = end - start + 1;
-            // Cap chunk size at 10MB to be safe
-            let actual_len = std::cmp::min(content_length, 10 * 1024 * 1024);
+            
+            // Allow larger chunks for images (up to 50MB), limit other media to 10MB
+            let max_chunk_size = if mime_type.starts_with("image/") {
+                50 * 1024 * 1024
+            } else {
+                10 * 1024 * 1024
+            };
+            
+            let actual_len = std::cmp::min(content_length, max_chunk_size);
             let mut buffer = vec![0u8; actual_len as usize];
             if file.seek(SeekFrom::Start(start)).is_err() {
                 return Response::builder()

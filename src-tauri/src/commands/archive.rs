@@ -50,6 +50,7 @@ pub async fn extract_archive(path: String) -> Result<(), String> {
 
 #[command]
 pub async fn compress_to_zip(paths: Vec<String>, dest_path: String) -> Result<(), String> {
+    println!("Compressing {} items to: {}", paths.len(), dest_path);
     if paths.is_empty() {
         return Err("No files selected for compression".to_string());
     }
@@ -69,30 +70,31 @@ pub async fn compress_to_zip(paths: Vec<String>, dest_path: String) -> Result<()
         }
 
         if path.is_file() {
-            let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-            zip.start_file(file_name.into_owned(), options).map_err(|e| e.to_string())?;
+            let file_name = path.file_name().unwrap_or_default().to_string_lossy().replace("\\", "/");
+            zip.start_file(file_name, options).map_err(|e| e.to_string())?;
             let mut f = File::open(path).map_err(|e| e.to_string())?;
             f.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
             zip.write_all(&buffer).map_err(|e| e.to_string())?;
             buffer.clear();
         } else if path.is_dir() {
             let base_path = path.parent().unwrap_or(Path::new(""));
+
             for entry in walkdir::WalkDir::new(path) {
                 let entry = match entry {
                     Ok(e) => e,
                     Err(_) => continue,
                 };
                 let entry_path = entry.path();
-                let relative_path = entry_path.strip_prefix(base_path).unwrap_or(entry_path).to_string_lossy();
+                let relative_path = entry_path.strip_prefix(base_path).unwrap_or(entry_path).to_string_lossy().replace("\\", "/");
 
                 if entry_path.is_file() {
-                    zip.start_file(relative_path.into_owned(), options).map_err(|e| e.to_string())?;
+                    zip.start_file(relative_path, options).map_err(|e| e.to_string())?;
                     let mut f = File::open(entry_path).map_err(|e| e.to_string())?;
                     f.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
                     zip.write_all(&buffer).map_err(|e| e.to_string())?;
                     buffer.clear();
-                } else if entry_path.is_dir() {
-                    zip.add_directory(relative_path.into_owned(), options).map_err(|e| e.to_string())?;
+                } else if entry_path.is_dir() && !relative_path.is_empty() {
+                    zip.add_directory(relative_path, options).map_err(|e| e.to_string())?;
                 }
             }
         }

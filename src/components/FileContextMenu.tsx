@@ -126,8 +126,9 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
     const handleCompress = async () => {
         try {
             toast.info("Compressing to zip...");
-            const currentTab = useExplorerStore.getState().tabs.find(t => t.id === tabId);
-            const parentBase = currentTab?.path.replace(/[/\\]+$/, "") || "";
+            // Use entry.path to derive parent directory instead of tab.path
+            // This guarantees it works in both File Explorer and Content Search (which may have no valid tab.path)
+            const parentBase = entry.path.split(/[/\\]/).slice(0, -1).join("/") || "";
             const zipName = entry.is_dir ? `${entry.name}.zip` : `${entry.name.replace(/\.[^/.]+$/, "")}.zip`;
             const destPath = `${parentBase}/${zipName}`;
 

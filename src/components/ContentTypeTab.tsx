@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useContentTypeStore } from "@/stores/contentTypeStore";
@@ -39,6 +39,8 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { FilePreviewContent } from "./FilePreviewContent";
+import { FileContextMenu } from "./FileContextMenu";
+import { FileEntry } from "@/types/explorer";
 
 interface ContentTypeTabProps {
     tabId: string;
@@ -54,6 +56,7 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
     const groupBy = useContentTypeStore((state) => state.groupBy);
     const setGroupBy = useContentTypeStore((state) => state.setGroupBy);
 
+    const [viewMode, setViewMode] = useState<"list" | "grid">("list");
     // Local selection state for bulk actions
     const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
     const [previewTarget, setPreviewTarget] = useState<string | null>(null);
@@ -187,11 +190,14 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
     };
 
     // Computed groups based on groupBy mode
-    const displayGroups = (() => {
-        if (groupBy === "category") return groups;
+    const displayGroups = useMemo(() => {
+        const archiveGroup = groups.find(g => g.category.toLowerCase() === "archives");
+        const filteredGroups = archiveGroup ? [archiveGroup] : [];
+
+        if (groupBy === "category" && viewMode !== "grid") return filteredGroups;
 
         const folderMap: Record<string, string[]> = {};
-        groups.forEach(group => {
+        filteredGroups.forEach(group => {
             group.paths.forEach(path => {
                 const folder = path.split(/[/\\]/).slice(0, -1).join("/") || "/";
                 if (!folderMap[folder]) folderMap[folder] = [];
@@ -203,7 +209,7 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
             category: folder,
             paths
         })).sort((a, b) => a.category.localeCompare(b.category));
-    })();
+    }, [groups, groupBy, viewMode]);
 
     const virtualizer = useVirtualizer({
         count: displayGroups.length,
@@ -211,6 +217,10 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
         estimateSize: (index) => {
             const group = displayGroups[index];
             if (group && expandedCategories.has(String(group.category))) {
+                if (viewMode === "grid") {
+                    const rows = Math.ceil(group.paths.length / 4);
+                    return 42 + (rows * 120) + 16;
+                }
                 return 42 + (group.paths.length * 30) + 8;
             }
             return 50;
@@ -220,7 +230,7 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
 
     useEffect(() => {
         virtualizer.measure();
-    }, [displayGroups, expandedCategories, previewTarget, virtualizer]);
+    }, [displayGroups, expandedCategories, previewTarget, virtualizer, viewMode]);
 
     return (
         <div className="flex h-full bg-background border rounded-md overflow-hidden transition-colors">
@@ -389,6 +399,25 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
                                     </span>
                                 </div>
                                 <div className="h-6 w-[1px] bg-border mx-1" />
+                                <div className="flex bg-muted/50 rounded-md p-0.5 border">
+                                    <Button
+                                        variant={viewMode === "list" ? "secondary" : "ghost"}
+                                        size="sm"
+                                        className="h-6 px-2.5 text-[10px]"
+                                        onClick={() => setViewMode("list")}
+                                    >
+                                        List
+                                    </Button>
+                                    <Button
+                                        variant={viewMode === "grid" ? "secondary" : "ghost"}
+                                        size="sm"
+                                        className="h-6 px-2.5 text-[10px]"
+                                        onClick={() => setViewMode("grid")}
+                                    >
+                                        Grid
+                                    </Button>
+                                </div>
+                                <div className="h-6 w-[1px] bg-border mx-1" />
                                 <span className="text-xs font-bold text-muted-foreground">
                                     {selectedPaths.size} items selected
                                 </span>
@@ -487,28 +516,54 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
                                                 </div>
 
                                                 {isExpanded && (
-                                                    <div className="p-1 space-y-0.5">
-                                                        {group.paths.map(path => (
-                                                            <div
-                                                                key={path}
-                                                                className={cn(
-                                                                    "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md transition-all cursor-pointer group",
-                                                                    selectedPaths.has(path) ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-accent",
-                                                                    previewTarget === path && "ring-1 ring-primary ring-inset bg-primary/5"
-                                                                )}
-                                                                onClick={() => setPreviewTarget(path)}
-                                                            >
-                                                                <Checkbox
-                                                                    checked={selectedPaths.has(path)}
-                                                                    onCheckedChange={() => toggleSelection(path)}
-                                                                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                                                                    className="w-3.5 h-3.5"
-                                                                />
-                                                                <div className="flex-1 min-w-0">
-                                                                    <div className="text-[11px] font-medium truncate group-hover:underline lowercase opacity-80 group-hover:opacity-100">{path}</div>
-                                                                </div>
-                                                            </div>
-                                                        ))}
+                                                    <div className={cn("p-1", viewMode === "grid" ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2" : "space-y-0.5")}>
+                                                        {group.paths.map((path) => {
+                                                            const extension = path.split('.').pop()?.toLowerCase() || "";
+                                                            const name = path.split(/[/\\]/).pop() || "";
+
+                                                            const mockEntry: FileEntry = {
+                                                                path,
+                                                                name,
+                                                                extension,
+                                                                size: 0,
+                                                                canonical_path: path,
+                                                                is_dir: false,
+                                                                modified: 0
+                                                            };
+
+                                                            return (
+                                                                <FileContextMenu key={path} entry={mockEntry} tabId={_tabId}>
+                                                                    <div
+                                                                        className={cn(
+                                                                            "transition-all cursor-pointer group relative overflow-hidden",
+                                                                            viewMode === "grid"
+                                                                                ? "flex flex-col items-center justify-center p-3 rounded-lg border aspect-square hover:border-primary/50"
+                                                                                : "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md",
+                                                                            selectedPaths.has(path) ? "bg-primary/5 hover:bg-primary/10" : "bg-background hover:bg-accent",
+                                                                            previewTarget === path && "ring-1 ring-primary ring-inset bg-primary/5"
+                                                                        )}
+                                                                        onClick={() => setPreviewTarget(path)}
+                                                                    >
+                                                                        <Checkbox
+                                                                            checked={selectedPaths.has(path)}
+                                                                            onCheckedChange={() => toggleSelection(path)}
+                                                                            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                                                            className={cn("absolute", viewMode === "grid" ? "top-2 left-2" : "relative z-10")}
+                                                                        />
+                                                                        {viewMode === "grid" && (
+                                                                            <div className="mb-2 text-muted-foreground group-hover:text-primary transition-colors">
+                                                                                <Archive className="w-8 h-8" />
+                                                                            </div>
+                                                                        )}
+                                                                        <div className={cn("min-w-0", viewMode === "grid" ? "w-full text-center mt-1 z-10" : "flex-1")}>
+                                                                            <div className={cn("font-medium truncate opacity-80 group-hover:opacity-100", viewMode === "grid" ? "text-xs" : "text-[11px] group-hover:underline lowercase")}>
+                                                                                {viewMode === "grid" ? name : path}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </FileContextMenu>
+                                                            );
+                                                        })}
                                                     </div>
                                                 )}
                                             </div>
