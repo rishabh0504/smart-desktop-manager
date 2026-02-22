@@ -1,5 +1,15 @@
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
@@ -34,6 +44,7 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
     const [renameInput, setRenameInput] = useState("");
     const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
     const [newFolderInput, setNewFolderInput] = useState("");
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
     const existingNames = currentTab?.entries.map(e => e.name.toLowerCase()) || [];
 
@@ -117,10 +128,28 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
             toast.info("Extracting archive...");
             await invoke("extract_archive", { path: entry.path });
             toast.success("Extraction complete");
-            refresh(tabId);
+            setIsDeleteDialogOpen(true);
         } catch (error) {
             toast.error(`Extraction failed: ${error}`);
         }
+    };
+
+    const confirmDeleteZip = async () => {
+        setIsDeleteDialogOpen(false);
+        try {
+            const operationId = crypto.randomUUID();
+            await invoke("delete_items", { operationId, paths: [entry.path] });
+            toast.success("Original archive deleted");
+            refresh(tabId);
+        } catch (error) {
+            console.error("Delete failed:", error);
+            toast.error(`Delete failed: ${error}`);
+        }
+    };
+
+    const handleCancelDeleteZip = () => {
+        setIsDeleteDialogOpen(false);
+        refresh(tabId);
     };
 
     const handleCompress = async () => {
@@ -322,6 +351,25 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
                     </form>
                 </DialogContent>
             </Dialog>
+
+            <AlertDialog open={isDeleteDialogOpen} onOpenChange={(open) => {
+                if (!open) handleCancelDeleteZip();
+            }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Archive</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Extraction complete. Do you want to delete the original archive "{entry.name}"?
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={handleCancelDeleteZip}>No, Keep It</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDeleteZip} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            Yes, Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </>
     );
 };
