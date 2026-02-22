@@ -25,8 +25,10 @@ interface DedupeStore {
     scanQueue: string[];
     expandedGroups: Set<string>;
     previewTarget: string | null;
+    sameFolderOnly: boolean;
 
     // Actions
+    setSameFolderOnly: (val: boolean) => void;
     addToQueue: (path: string) => void;
     removeFromQueue: (path: string) => void;
     startScan: () => Promise<void>;
@@ -34,7 +36,7 @@ interface DedupeStore {
     toggleSelection: (path: string) => void;
     toggleGroup: (hash: string) => void;
     setPreviewTarget: (path: string | null) => void;
-    selectDuplicates: (strategy: "all-but-newest" | "all-but-oldest" | "none") => void;
+    selectDuplicates: (strategy: "all-but-newest" | "all-but-oldest" | "none", filteredGroups?: DuplicateGroup[]) => void;
     deleteSelected: () => Promise<void>;
 }
 
@@ -46,6 +48,9 @@ export const useDedupeStore = create<DedupeStore>((set, get) => ({
     scanQueue: [],
     expandedGroups: new Set(),
     previewTarget: null,
+    sameFolderOnly: false,
+
+    setSameFolderOnly: (val: boolean) => set({ sameFolderOnly: val }),
 
     addToQueue: (path) => set(state => ({
         scanQueue: state.scanQueue.includes(path) ? state.scanQueue : [...state.scanQueue, path]
@@ -143,7 +148,7 @@ export const useDedupeStore = create<DedupeStore>((set, get) => ({
 
     setPreviewTarget: (path) => set({ previewTarget: path }),
 
-    selectDuplicates: (strategy) => {
+    selectDuplicates: (strategy, filteredGroups?: DuplicateGroup[]) => {
         const { duplicates } = get();
         const newSelection = new Set<string>();
 
@@ -152,8 +157,10 @@ export const useDedupeStore = create<DedupeStore>((set, get) => ({
             return;
         }
 
+        const groupsToProcess = filteredGroups || duplicates;
+
         // Simple strategy: select all but the first one in each group
-        duplicates.forEach(group => {
+        groupsToProcess.forEach(group => {
             group.paths.slice(1).forEach(path => newSelection.add(path));
         });
 

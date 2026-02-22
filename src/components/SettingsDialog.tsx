@@ -118,13 +118,11 @@ export const SettingsDialog = ({ open, onOpenChange }: SettingsDialogProps) => {
                     </DialogHeader>
 
                     <div className="flex-1 overflow-y-auto px-6 py-4 space-y-8">
-                        {activeSection === "explorer" || activeSection === "dedupe" || activeSection === "content_search" ? (
+                        {activeSection === "explorer" || activeSection === "dedupe" || activeSection === "content_search" || activeSection === "clean" ? (
                             <ConfigSectionView section={activeSection} />
                         ) : activeSection === "appearance" ? (
                             <AppearanceSectionView />
-                        ) : (
-                            <CleanViewPlaceholder />
-                        )}
+                        ) : null}
 
                         {activeSection === "explorer" && (
                             <section className="space-y-3">
@@ -180,7 +178,7 @@ const SidebarItem = ({ label, icon, active, onClick }: { label: string, icon: Re
     </button>
 );
 
-const ConfigSectionView = ({ section }: { section: "explorer" | "dedupe" | "content_search" }) => {
+const ConfigSectionView = ({ section }: { section: "explorer" | "dedupe" | "content_search" | "clean" }) => {
     const settings = useSettingsStore((state) => state.settings[section]);
     const updateSettings = useSettingsStore((state) => state.updateSettings);
     const updatePreviewSettings = useSettingsStore((state) => state.updatePreviewSettings);
@@ -223,79 +221,133 @@ const ConfigSectionView = ({ section }: { section: "explorer" | "dedupe" | "cont
             </section>
 
             {/* Preview Section */}
-            <section className="space-y-3">
-                <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                    <FileSearch className="w-3 h-3" /> Preview & Filtering
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                    <PreviewToggle
-                        label="Images"
-                        icon={<Image className="w-4 h-4" />}
-                        active={settings.preview_enabled.image}
-                        onClick={() => updatePreviewSettings(section, { image: !settings.preview_enabled.image })}
-                    />
-                    <PreviewToggle
-                        label="Video"
-                        icon={<Video className="w-4 h-4" />}
-                        active={settings.preview_enabled.video}
-                        onClick={() => updatePreviewSettings(section, { video: !settings.preview_enabled.video })}
-                    />
-                    <PreviewToggle
-                        label="Audio"
-                        icon={<Music className="w-4 h-4" />}
-                        active={settings.preview_enabled.audio}
-                        onClick={() => updatePreviewSettings(section, { audio: !settings.preview_enabled.audio })}
-                    />
-                    <PreviewToggle
-                        label="Text"
-                        icon={<FileText className="w-4 h-4" />}
-                        active={settings.preview_enabled.text}
-                        onClick={() => updatePreviewSettings(section, { text: !settings.preview_enabled.text })}
-                    />
-                    <PreviewToggle
-                        label="Documents"
-                        icon={<FileText className="w-4 h-4" />}
-                        active={settings.preview_enabled.document}
-                        onClick={() => updatePreviewSettings(section, { document: !settings.preview_enabled.document })}
-                    />
-                    <PreviewToggle
-                        label="Archives"
-                        icon={<Archive className="w-4 h-4" />}
-                        active={settings.preview_enabled.archive}
-                        onClick={() => updatePreviewSettings(section, { archive: !settings.preview_enabled.archive })}
-                    />
-                </div>
-            </section>
-
-            {/* Performance Filters */}
-            {section !== "content_search" && (
+            {section !== "clean" && (
                 <section className="space-y-3">
                     <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                        <Trash2 className="w-3 h-3" /> Performance Filters
+                        <FileSearch className="w-3 h-3" /> Preview & Filtering
                     </h3>
-                    <div className="flex gap-2 max-w-[300px]">
-                        <Input
-                            placeholder="Ex: iso, tmp, log"
-                            value={newExt}
-                            onChange={(e) => setNewExt(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleAddExt()}
-                            className="h-8 text-xs"
+                    <div className="flex flex-wrap gap-2">
+                        <PreviewToggle
+                            label="Images"
+                            icon={<Image className="w-4 h-4" />}
+                            active={settings.preview_enabled.image}
+                            onClick={() => updatePreviewSettings(section, { image: !settings.preview_enabled.image })}
                         />
-                        <Button size="sm" className="h-8 px-2" onClick={handleAddExt}>
-                            <Plus className="w-4 h-4" />
-                        </Button>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                        {settings.blocked_extensions.map((ext: string) => (
-                            <div key={ext} className="flex items-center gap-1.5 px-2 py-0.5 bg-muted rounded-full text-[10px] border shadow-sm">
-                                <span>.{ext}</span>
-                                <button onClick={() => removeBlockedExtension(section, ext)} className="hover:text-destructive transition-colors">
-                                    <Plus className="w-3 h-3 rotate-45" />
-                                </button>
-                            </div>
-                        ))}
+                        <PreviewToggle
+                            label="Video"
+                            icon={<Video className="w-4 h-4" />}
+                            active={settings.preview_enabled.video}
+                            onClick={() => updatePreviewSettings(section, { video: !settings.preview_enabled.video })}
+                        />
+                        <PreviewToggle
+                            label="Audio"
+                            icon={<Music className="w-4 h-4" />}
+                            active={settings.preview_enabled.audio}
+                            onClick={() => updatePreviewSettings(section, { audio: !settings.preview_enabled.audio })}
+                        />
+                        <PreviewToggle
+                            label="Text"
+                            icon={<FileText className="w-4 h-4" />}
+                            active={settings.preview_enabled.text}
+                            onClick={() => updatePreviewSettings(section, { text: !settings.preview_enabled.text })}
+                        />
+                        <PreviewToggle
+                            label="Documents"
+                            icon={<FileText className="w-4 h-4" />}
+                            active={settings.preview_enabled.document}
+                            onClick={() => updatePreviewSettings(section, { document: !settings.preview_enabled.document })}
+                        />
+                        <PreviewToggle
+                            label="Archives"
+                            icon={<Archive className="w-4 h-4" />}
+                            active={settings.preview_enabled.archive}
+                            onClick={() => updatePreviewSettings(section, { archive: !settings.preview_enabled.archive })}
+                        />
                     </div>
                 </section>
+            )}
+
+            {/* Performance Filters */}
+            {(section === "explorer" || section === "dedupe" || section === "content_search") && (
+                <div className="space-y-6">
+                    <section className="space-y-3">
+                        <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                            <Trash2 className="w-3 h-3" /> Blocked Extensions
+                        </h3>
+                        <div className="flex gap-2 max-w-[300px]">
+                            <Input
+                                placeholder="Ex: iso, tmp, log"
+                                value={newExt}
+                                onChange={(e) => setNewExt(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleAddExt()}
+                                className="h-8 text-xs"
+                            />
+                            <Button size="sm" className="h-8 px-2" onClick={handleAddExt}>
+                                <Plus className="w-4 h-4" />
+                            </Button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                            {settings.blocked_extensions.map((ext: string) => (
+                                <div key={ext} className="flex items-center gap-1.5 px-2 py-0.5 bg-muted rounded-full text-[10px] border shadow-sm">
+                                    <span>.{ext}</span>
+                                    <button onClick={() => removeBlockedExtension(section, ext)} className="hover:text-destructive transition-colors">
+                                        <Plus className="w-3 h-3 rotate-45" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+
+                    <section className="space-y-3">
+                        <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                            <FileSearch className="w-3 h-3" /> Blocked File Names
+                        </h3>
+                        <p className="text-[10px] text-muted-foreground">
+                            Exclude specific files from being scanned (e.g. LICENSE, README).
+                        </p>
+                        <div className="flex gap-2 max-w-[300px]">
+                            <Input
+                                placeholder="Ex: LICENSE, README.md"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        const val = e.currentTarget.value;
+                                        if (val) {
+                                            useSettingsStore.getState().addBlockedName(section, val);
+                                            e.currentTarget.value = "";
+                                        }
+                                    }
+                                }}
+                                className="h-8 text-xs"
+                            />
+                            <Button
+                                size="sm"
+                                className="h-8 px-2"
+                                onClick={(e) => {
+                                    const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                                    if (input.value) {
+                                        useSettingsStore.getState().addBlockedName(section, input.value);
+                                        input.value = "";
+                                    }
+                                }}
+                            >
+                                <Plus className="w-4 h-4" />
+                            </Button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                            {settings.blocked_names.map((name: string) => (
+                                <div key={name} className="flex items-center gap-1.5 px-2 py-0.5 bg-muted rounded-full text-[10px] border shadow-sm">
+                                    <span>{name}</span>
+                                    <button
+                                        onClick={() => useSettingsStore.getState().removeBlockedName(section, name)}
+                                        className="hover:text-destructive transition-colors"
+                                    >
+                                        <Plus className="w-3 h-3 rotate-45" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+                </div>
             )}
         </>
     );
@@ -479,14 +531,3 @@ const AppearanceSectionView = () => {
     );
 };
 
-const CleanViewPlaceholder = () => (
-    <div className="flex flex-col items-center justify-center h-full py-12 text-center opacity-40">
-        <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
-            <Eraser className="w-8 h-8" />
-        </div>
-        <h3 className="text-sm font-bold">No Config Required</h3>
-        <p className="text-[10px] text-muted-foreground max-w-[200px] mt-1">
-            Clean View currently focuses on identifying empty folders and doesn't require specific filtering settings.
-        </p>
-    </div>
-);

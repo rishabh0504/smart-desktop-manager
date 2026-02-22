@@ -144,6 +144,11 @@ pub async fn find_duplicates<R: Runtime>(
                 continue;
             }
 
+            // Blocked names filter
+            if settings.blocked_names.contains(&name) {
+                continue;
+            }
+
             // Category/Preview filter
             let category = get_file_category(&extension);
             if !is_category_enabled(category, &settings) {

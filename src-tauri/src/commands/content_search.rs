@@ -91,6 +91,10 @@ pub async fn find_content_by_category<R: Runtime>(
                 continue;
             }
 
+            if settings.blocked_names.contains(&name) {
+                continue;
+            }
+
             let file_cat = get_file_category(&extension);
             if !is_category_enabled(file_cat, &settings) {
                 continue;

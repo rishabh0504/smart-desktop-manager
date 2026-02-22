@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
 import { isVideoExtension, isImageExtension, isAudioExtension, isTextExtension, isDocumentExtension } from "@/lib/fileTypes";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { usePreviewStore } from "@/stores/previewStore";
 
 interface FilePreviewContentProps {
     path: string;
@@ -15,22 +16,34 @@ interface FilePreviewContentProps {
 
 function VideoPreview({ src, className }: { src: string; className?: string }) {
     const videoRef = useRef<HTMLVideoElement>(null);
+    const volume = usePreviewStore((state) => state.volume);
+    const isMuted = usePreviewStore((state) => state.isMuted);
+    const setVolume = usePreviewStore((state) => state.setVolume);
+    const setIsMuted = usePreviewStore((state) => state.setIsMuted);
+    const rotation = usePreviewStore((state) => state.rotation);
+
     useEffect(() => {
         const el = videoRef.current;
         if (!el) return;
-        el.muted = true;
-        const onPlay = () => { el.muted = true; };
-        el.addEventListener("play", onPlay);
-        return () => el.removeEventListener("play", onPlay);
-    }, [src]);
+        el.muted = isMuted;
+        el.volume = volume;
+    }, [src, isMuted, volume]);
+
+    const handleVolumeChange = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
+        const el = e.currentTarget;
+        setVolume(el.volume);
+        setIsMuted(el.muted);
+    };
+
     return (
         <video
             ref={videoRef}
             controls
             src={src}
-            className={className}
+            className={cn(className, "transition-transform duration-300")}
+            style={{ transform: `rotate(${rotation}deg)` }}
+            onVolumeChange={handleVolumeChange}
             autoPlay
-            muted
             playsInline
         />
     );
@@ -43,6 +56,12 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
 
     const settings = useSettingsStore((state) => state.settings[section]);
     const previewSettings = settings.preview_enabled;
+
+    const rotation = usePreviewStore((state) => state.rotation);
+    const volume = usePreviewStore((state) => state.volume);
+    const isMuted = usePreviewStore((state) => state.isMuted);
+    const setVolume = usePreviewStore((state) => state.setVolume);
+    const setIsMuted = usePreviewStore((state) => state.setIsMuted);
 
     const ext = extension.toLowerCase().replace(/^\./, '');
     const isImage = isImageExtension(ext) && previewSettings.image;
@@ -127,7 +146,8 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
                 <img
                     src={content}
                     alt={name}
-                    className="max-w-full max-h-full object-contain shadow-2xl rounded-sm"
+                    className="max-w-full max-h-full object-contain shadow-2xl rounded-sm transition-transform duration-300"
+                    style={{ transform: `rotate(${rotation}deg)` }}
                     loading="lazy"
                 />
             )}
@@ -141,7 +161,22 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
                     <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
                         <Music className="w-12 h-12 text-primary/50" />
                     </div>
-                    <audio controls src={content || undefined} className="w-64 shadow-lg" autoPlay muted />
+                    <audio
+                        controls
+                        src={content || undefined}
+                        className="w-64 shadow-lg"
+                        autoPlay
+                        ref={(el) => {
+                            if (el) {
+                                el.volume = volume;
+                                el.muted = isMuted;
+                            }
+                        }}
+                        onVolumeChange={(e) => {
+                            setVolume(e.currentTarget.volume);
+                            setIsMuted(e.currentTarget.muted);
+                        }}
+                    />
                 </div>
             )}
 
@@ -155,7 +190,8 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
                 <embed
                     src={content}
                     type="application/pdf"
-                    className="w-full h-full rounded-sm shadow-xl"
+                    className="w-full h-full rounded-sm shadow-xl transition-transform duration-300"
+                    style={{ transform: `rotate(${rotation}deg)` }}
                 />
             )}
 

@@ -3,7 +3,7 @@ import { usePreviewStore } from "@/stores/previewStore";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
 import { useMoveQueueStore } from "@/stores/moveQueueStore";
-import { FileText, Image as ImageIcon, Video, Music, FileQuestion, ChevronLeft, ChevronRight, FolderOpen, Maximize2, Minimize2, ListPlus, ListMinus, FolderInput } from "lucide-react";
+import { FileText, Image as ImageIcon, Video, Music, FileQuestion, ChevronLeft, ChevronRight, FolderOpen, Maximize2, Minimize2, ListPlus, ListMinus, FolderInput, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -25,6 +25,9 @@ export const PreviewModal = () => {
     const isOpen = usePreviewStore((state) => state.isOpen);
     const closePreview = usePreviewStore((state) => state.closePreview);
     const openPreview = usePreviewStore((state) => state.openPreview);
+    const rotation = usePreviewStore((state) => state.rotation);
+    const setRotation = usePreviewStore((state) => state.setRotation);
+    const resetRotation = usePreviewStore((state) => state.resetRotation);
 
     const activeTabId = useExplorerStore((state) => state.activeTabId);
     const tabs = useExplorerStore((state) => state.tabs);
@@ -74,9 +77,10 @@ export const PreviewModal = () => {
         }
 
         if (!currentEntries[i].is_dir) {
+            resetRotation();
             openPreview({ ...currentEntries[i], path: currentEntries[i].canonical_path });
         }
-    }, [target, currentEntries, openPreview]);
+    }, [target, currentEntries, openPreview, resetRotation]);
 
     const handlePrev = useCallback(() => {
         if (!target || !currentEntries.length) return;
@@ -92,9 +96,10 @@ export const PreviewModal = () => {
         }
 
         if (!currentEntries[i].is_dir) {
+            resetRotation();
             openPreview({ ...currentEntries[i], path: currentEntries[i].canonical_path });
         }
-    }, [target, currentEntries, openPreview]);
+    }, [target, currentEntries, openPreview, resetRotation]);
 
     const handleAddToDeleteQueue = useCallback(() => {
         if (!target) return;
@@ -196,6 +201,15 @@ export const PreviewModal = () => {
                     </DialogTitle>
 
                     <div className="flex items-center gap-2 mr-8 relative z-[60]">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn("h-8 w-8", isTheatrical && "text-white hover:bg-white/20")}
+                            onClick={() => setRotation((rotation + 90) % 360)}
+                            title="Rotate 90°"
+                        >
+                            <RotateCw className="w-4 h-4" />
+                        </Button>
                         <Button
                             variant="ghost"
                             size="icon"

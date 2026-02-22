@@ -71,6 +71,7 @@ export interface ConfigSection {
     show_hidden_files: boolean;
     show_system_files: boolean;
     blocked_extensions: string[];
+    blocked_names: string[];
 }
 
 export interface ThemeSettings {

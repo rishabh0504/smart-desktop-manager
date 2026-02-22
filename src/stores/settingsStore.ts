@@ -5,6 +5,7 @@ import { useExplorerStore } from "./explorerStore";
 
 const GRID_THUMB_WIDTH_KEY = "sdm-grid-thumb-width";
 const GRID_THUMB_HEIGHT_KEY = "sdm-grid-thumb-height";
+const SETTINGS_STORAGE_KEY = "sdm-app-settings";
 const GRID_THUMB_DEFAULT = 30;
 
 function getGridThumbFromStorage(): { width: number; height: number } {
@@ -29,7 +30,10 @@ const DEFAULT_CONFIG: ConfigSection = {
     },
     show_hidden_files: false,
     show_system_files: false,
-    blocked_extensions: ["iso", "tmp"],
+    blocked_extensions: [
+        "js", "ts", "jsx", "tsx", "py", "rs", "c", "cpp", "h", "hpp", "java", "go", "php", "rb", "swift", "kt", "dart", "r", "lua", "pl", "sh", "bash", "zsh", "json", "yaml", "yml", "toml", "md", "markdown", "css", "scss", "less", "html", "htm", "sql", "iso", "tmp", "map"
+    ],
+    blocked_names: ["LICENSE", "README", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", ".gitignore", ".DS_Store"],
 };
 
 interface SettingsState {
@@ -44,6 +48,8 @@ interface SettingsState {
     updateGridThumbnailSize: (width: number, height: number) => void;
     addBlockedExtension: (section: "explorer" | "dedupe" | "content_search" | "clean", ext: string) => Promise<void>;
     removeBlockedExtension: (section: "explorer" | "dedupe" | "content_search" | "clean", ext: string) => Promise<void>;
+    addBlockedName: (section: "explorer" | "dedupe" | "content_search" | "clean", name: string) => Promise<void>;
+    removeBlockedName: (section: "explorer" | "dedupe" | "content_search" | "clean", name: string) => Promise<void>;
     updateTheme: (values: Partial<AppSettings["theme"]>) => Promise<void>;
 }
 
@@ -68,7 +74,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         try {
             const settings = await invoke<AppSettings>("load_settings");
             const grid = getGridThumbFromStorage();
-            set({ settings, loading: false, grid_thumbnail_width: grid.width, grid_thumbnail_height: grid.height });
+
+            // Load from localStorage and merge
+            let finalSettings = settings;
+            if (typeof window !== "undefined") {
+                const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
+                if (stored) {
+                    try {
+                        const parsed = JSON.parse(stored);
+                        finalSettings = { ...settings, ...parsed };
+                    } catch (e) {
+                        console.error("Failed to parse stored settings:", e);
+                    }
+                }
+            }
+
+            set({ settings: finalSettings, loading: false, grid_thumbnail_width: grid.width, grid_thumbnail_height: grid.height });
         } catch (err) {
             console.error("Failed to load settings:", err);
             const grid = getGridThumbFromStorage();
@@ -92,6 +113,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         const updatedSettings = { ...get().settings, [section]: updatedSection };
 
         set({ settings: updatedSettings });
+
+        if (typeof window !== "undefined") {
+            localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updatedSettings));
+        }
 
         try {
             await invoke("save_settings", { settings: updatedSettings });
@@ -126,12 +151,30 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         await get().updateSettings(section, { blocked_extensions: updated });
     },
 
+    addBlockedName: async (section, name) => {
+        const currentNames = get().settings[section].blocked_names;
+        if (!currentNames.includes(name)) {
+            const updated = [...currentNames, name];
+            await get().updateSettings(section, { blocked_names: updated });
+        }
+    },
+
+    removeBlockedName: async (section, name) => {
+        const currentNames = get().settings[section].blocked_names;
+        const updated = currentNames.filter(n => n !== name);
+        await get().updateSettings(section, { blocked_names: updated });
+    },
+
     updateTheme: async (values) => {
         const currentTheme = get().settings.theme;
         const updatedTheme = { ...currentTheme, ...values };
         const updatedSettings = { ...get().settings, theme: updatedTheme };
 
         set({ settings: updatedSettings });
+
+        if (typeof window !== "undefined") {
+            localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updatedSettings));
+        }
 
         try {
             await invoke("save_settings", { settings: updatedSettings });

@@ -27,6 +27,7 @@ pub struct ConfigSection {
     pub show_hidden_files: bool,
     pub show_system_files: bool,
     pub blocked_extensions: Vec<String>,
+    pub blocked_names: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -68,7 +69,23 @@ impl Default for ConfigSection {
             preview_enabled: PreviewSettings::default(),
             show_hidden_files: false,
             show_system_files: false,
-            blocked_extensions: vec!["iso".to_string(), "tmp".to_string()],
+            blocked_extensions: vec![
+                "js".to_string(), "ts".to_string(), "jsx".to_string(), "tsx".to_string(),
+                "py".to_string(), "rs".to_string(), "c".to_string(), "cpp".to_string(),
+                "h".to_string(), "hpp".to_string(), "java".to_string(), "go".to_string(),
+                "php".to_string(), "rb".to_string(), "swift".to_string(), "kt".to_string(),
+                "dart".to_string(), "r".to_string(), "lua".to_string(), "pl".to_string(),
+                "sh".to_string(), "bash".to_string(), "zsh".to_string(), "json".to_string(),
+                "yaml".to_string(), "yml".to_string(), "toml".to_string(), "md".to_string(),
+                "markdown".to_string(), "css".to_string(), "scss".to_string(), "less".to_string(),
+                "html".to_string(), "htm".to_string(), "sql".to_string(), "iso".to_string(),
+                "tmp".to_string(), "map".to_string()
+            ],
+            blocked_names: vec![
+                "LICENSE".to_string(), "README".to_string(), "package-lock.json".to_string(),
+                "pnpm-lock.yaml".to_string(), "yarn.lock".to_string(), ".gitignore".to_string(),
+                ".DS_Store".to_string()
+            ],
         }
     }
 }
@@ -126,6 +143,7 @@ pub fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
             show_hidden_files: old.show_hidden_files,
             show_system_files: old.show_system_files,
             blocked_extensions: old.blocked_extensions,
+            blocked_names: Vec::new(),
         };
         new.dedupe = new.explorer.clone();
         new.content_search = new.explorer.clone();

@@ -88,6 +88,11 @@ async fn find_recursive<R: Runtime>(
         
         let name = entry.file_name().to_string_lossy().to_string();
         
+        // Always ignore __MACOSX directories entirely for emptiness checks
+        if name == "__MACOSX" {
+            continue;
+        }
+        
         // Respect hidden/system toggles
         if !settings.show_hidden_files && name.starts_with('.') {
             continue;
@@ -134,17 +139,36 @@ pub async fn delete_empty_folders(paths: Vec<String>) -> Result<(), String> {
             continue;
         }
 
-        // Delete the directory
-        if let Err(e) = fs::remove_dir(&path) {
-            return Err(format!("Failed to delete {}: {}", path_str, e));
+        // Delete the directory and any allowed hidden contents
+        if let Err(e) = fs::remove_dir_all(&path) {
+            // Fallback for tricky macOS folders or permissions
+            #[cfg(unix)]
+            let fallback_status = std::process::Command::new("rm")
+                .arg("-rf")
+                .arg(&path)
+                .status();
+
+            #[cfg(windows)]
+            let fallback_status = std::process::Command::new("cmd")
+                .arg("/c")
+                .arg("rmdir")
+                .arg("/s")
+                .arg("/q")
+                .arg(&path)
+                .status();
+
+            // If fallback failed or the directory still exists, return the original error
+            if fallback_status.is_err() || !fallback_status.unwrap().success() || path.exists() {
+                return Err(format!("Failed to delete {}: {}", path_str, e));
+            }
         }
 
         // Recursive parent cleanup
         let mut current_parent = path.parent();
         while let Some(parent) = current_parent {
-            // Check if parent is now empty
+            // Check if parent is now empty (or only contains hidden/__MACOSX files)
             if is_dir_empty(parent) {
-                if let Err(_) = fs::remove_dir(parent) {
+                if let Err(_) = fs::remove_dir_all(parent) {
                     // Stop if we hit permissions or root
                     break;
                 }
@@ -159,7 +183,17 @@ pub async fn delete_empty_folders(paths: Vec<String>) -> Result<(), String> {
 
 fn is_dir_empty(path: &Path) -> bool {
     match fs::read_dir(path) {
-        Ok(mut entries) => entries.next().is_none(),
+        Ok(entries) => {
+            for entry in entries {
+                if let Ok(e) = entry {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if name != "__MACOSX" && !name.starts_with('.') {
+                        return false;
+                    }
+                }
+            }
+            true
+        },
         Err(_) => false,
     }
 }

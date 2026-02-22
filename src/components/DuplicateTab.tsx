@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useDedupeStore } from "@/stores/dedupeStore";
@@ -59,6 +59,8 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
     const setPreviewTarget = useDedupeStore((state) => state.setPreviewTarget);
     const selectDuplicates = useDedupeStore((state) => state.selectDuplicates);
     const deleteSelected = useDedupeStore((state) => state.deleteSelected);
+    const sameFolderOnly = useDedupeStore((state) => state.sameFolderOnly);
+    const setSameFolderOnly = useDedupeStore((state) => state.setSameFolderOnly);
 
     const deleteQueue = useDeleteQueueStore((state) => state.queue);
     const addToDeleteQueue = useDeleteQueueStore((state) => state.addToQueue);
@@ -70,6 +72,28 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
     const findQueuesContainingPath = useMoveQueueStore((state) => state.findQueuesContainingPath);
 
     const [selectedMoveQueueId, setSelectedMoveQueueId] = useState<string>("");
+
+    const filteredDuplicates = useMemo(() => {
+        if (!sameFolderOnly) return duplicates;
+
+        return duplicates.map(group => {
+            const parentGroups: Record<string, string[]> = {};
+            group.paths.forEach(path => {
+                const parent = path.substring(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')));
+                if (!parentGroups[parent]) parentGroups[parent] = [];
+                parentGroups[parent].push(path);
+            });
+
+            const filteredPaths = Object.values(parentGroups)
+                .filter(paths => paths.length > 1)
+                .flat();
+
+            return {
+                ...group,
+                paths: filteredPaths
+            };
+        }).filter(group => group.paths.length > 1);
+    }, [duplicates, sameFolderOnly]);
 
     useEffect(() => {
         if (moveQueues.length === 0) setSelectedMoveQueueId("");
@@ -172,10 +196,10 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
     };
 
     const virtualizer = useVirtualizer({
-        count: duplicates.length,
+        count: filteredDuplicates.length,
         getScrollElement: () => scrollRef.current,
         estimateSize: (index) => {
-            const group = duplicates[index];
+            const group = filteredDuplicates[index];
             if (group && expandedGroups.has(String(group.hash))) {
                 return 42 + (group.paths.length * 30) + 8;
             }
@@ -186,7 +210,7 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
 
     useEffect(() => {
         virtualizer.measure();
-    }, [duplicates, expandedGroups, previewTarget, virtualizer]);
+    }, [filteredDuplicates, expandedGroups, previewTarget, virtualizer]);
 
     return (
         <div className="flex h-full bg-background border rounded-md overflow-hidden transition-colors">
@@ -204,6 +228,30 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                         </div>
 
                         <div className="flex items-center gap-2">
+                            {duplicates.length > 0 && (
+                                <div className="flex items-center mr-2 border-r border-border pr-5 justify-end">
+                                    <label className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground cursor-pointer hover:text-foreground">
+                                        <Checkbox
+                                            checked={sameFolderOnly}
+                                            onCheckedChange={(checked) => setSameFolderOnly(checked as boolean)}
+                                            className="w-3.5 h-3.5"
+                                        />
+                                        Same Folder Only
+                                    </label>
+                                </div>
+                            )}
+
+                            {duplicates.length > 0 && !scanning && progress && (
+                                <div className="flex items-center gap-2 mr-2 border-r border-border pr-5 justify-end">
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[9px] uppercase text-muted-foreground font-bold tracking-wider">Time Taken</span>
+                                        <span className="text-xs font-bold text-primary flex items-center gap-1">
+                                            <Clock className="w-3 h-3" />
+                                            {formatDuration(progress.elapsed_ms)}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
                             {duplicates.length > 0 && !scanning && (
                                 <div className="flex items-center gap-1.5">
                                     <Button
@@ -334,14 +382,6 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                     <div className="flex-1 flex flex-col overflow-hidden text-foreground">
                         <div className="bg-muted/30 px-4 py-2 border-b flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <div className="flex flex-col">
-                                    <span className="text-[9px] uppercase text-muted-foreground font-bold tracking-wider">Time Taken</span>
-                                    <span className="text-xs font-bold text-primary flex items-center gap-1">
-                                        <Clock className="w-3 h-3" />
-                                        {progress ? formatDuration(progress.elapsed_ms) : "N/A"}
-                                    </span>
-                                </div>
-                                <div className="h-6 w-[1px] bg-border mx-1" />
                                 <Button
                                     variant="ghost"
                                     size="sm"
@@ -350,7 +390,7 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                         if (selectedPaths.size > 0) {
                                             selectDuplicates("none");
                                         } else {
-                                            selectDuplicates("all-but-newest");
+                                            selectDuplicates("all-but-newest", filteredDuplicates);
                                         }
                                     }}
                                 >
@@ -426,13 +466,20 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                             </div>
                         </div>
 
-                        <div ref={scrollRef} className="flex-1 overflow-auto min-h-0">
+                        <div ref={scrollRef} className="flex-1 overflow-auto min-h-0 relative">
+                            {filteredDuplicates.length === 0 && sameFolderOnly && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center opacity-70">
+                                    <Search className="w-10 h-10 text-muted-foreground mb-4 opacity-50" />
+                                    <p className="text-sm font-medium text-foreground">No same-folder duplicates found</p>
+                                    <p className="text-xs text-muted-foreground mt-1">Try disabling the filter</p>
+                                </div>
+                            )}
                             <div
                                 style={{ height: virtualizer.getTotalSize(), position: "relative" }}
                                 className="w-full"
                             >
                                 {virtualizer.getVirtualItems().map((virtualRow) => {
-                                    const group = duplicates[virtualRow.index];
+                                    const group = filteredDuplicates[virtualRow.index];
                                     if (!group) return null;
                                     const isExpanded = expandedGroups.has(String(group.hash));
 
