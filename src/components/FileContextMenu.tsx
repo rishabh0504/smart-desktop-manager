@@ -359,7 +359,10 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
                     <AlertDialogHeader>
                         <AlertDialogTitle>Delete Archive</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Extraction complete. Do you want to delete the original archive "{entry.name}"?
+                            Extraction complete. Do you want to delete the original archive{" "}
+                            <span className="font-mono font-semibold truncate max-w-[240px] inline-block align-bottom" title={entry.name}>
+                                "{entry.name.length > 40 ? entry.name.slice(0, 37) + "..." : entry.name}"
+                            </span>?
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>

@@ -60,6 +60,7 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
     // Local selection state for bulk actions
     const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
     const [previewTarget, setPreviewTarget] = useState<string | null>(null);
+    const [isExtracting, setIsExtracting] = useState(false);
 
     const startScan = useContentTypeStore((state) => state.startScan);
     const reset = useContentTypeStore((state) => state.reset);
@@ -166,6 +167,44 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
         });
         toast.success(`Added ${selectedPaths.size} files to move queue`);
     }, [selectedPaths, selectedMoveQueueId, addToMoveQueue]);
+
+    const bulkExtract = useCallback(async () => {
+        const archives = Array.from(selectedPaths).filter(path => {
+            const ext = path.split('.').pop()?.toLowerCase();
+            return ext && ["zip", "tar", "gz", "tgz", "rar", "7z"].includes(ext);
+        });
+
+        if (archives.length === 0) {
+            toast.error("No archives selected");
+            return;
+        }
+
+        setIsExtracting(true);
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const path of archives) {
+            try {
+                await invoke("extract_archive", { path });
+                const operationId = crypto.randomUUID();
+                await invoke("delete_items", { operationId, paths: [path] });
+                successCount++;
+            } catch (error) {
+                console.error(`Failed to extract/delete ${path}:`, error);
+                failCount++;
+            }
+        }
+
+        setIsExtracting(false);
+        setSelectedPaths(new Set());
+        startScan(); // Refresh scan
+
+        if (failCount === 0) {
+            toast.success(`Successfully extracted and deleted ${successCount} archives`);
+        } else {
+            toast.error(`Extracted ${successCount}, failed ${failCount} archives`);
+        }
+    }, [selectedPaths, startScan]);
 
     const formatDuration = (ms: number) => {
         if (ms < 1000) return `${ms}ms`;
@@ -431,6 +470,21 @@ export const ContentTypeTab = ({ tabId: _tabId }: ContentTypeTabProps) => {
                                 </Button>
                             </div>
                             <div className="flex items-center gap-3">
+                                {Array.from(selectedPaths).some(path => {
+                                    const ext = path.split('.').pop()?.toLowerCase();
+                                    return ext && ["zip", "tar", "gz", "tgz", "rar", "7z"].includes(ext);
+                                }) && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 px-2.5 text-[11px] font-medium text-orange-500 hover:bg-orange-500/10"
+                                            disabled={isExtracting}
+                                            onClick={bulkExtract}
+                                        >
+                                            {isExtracting ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Archive className="w-3.5 h-3.5 mr-1" />}
+                                            Extract & Delete Zips
+                                        </Button>
+                                    )}
                                 <Button
                                     variant="outline"
                                     size="sm"
