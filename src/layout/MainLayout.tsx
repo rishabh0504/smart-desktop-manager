@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { FilePanel } from "@/panels/FilePanel";
 import { useExplorerStore } from "@/stores/explorerStore";
-import { SearchDialog } from "@/components/SearchDialog";
 import { SearchResultsPanel } from "@/components/SearchResultsPanel";
 import { Button } from "@/components/ui/button";
 import { Search, Sun, Moon, Settings, Keyboard, Menu, Plus, Trash2, FolderInput } from "lucide-react";
@@ -38,7 +37,6 @@ export const MainLayout = () => {
     const { toggleSidebar } = useSidebarStore();
     const { items } = useListStore();
 
-    const [searchOpen, setSearchOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [trayOpen, setTrayOpen] = useState(false);
     const [deleteQueueOpen, setDeleteQueueOpen] = useState(false);
@@ -57,7 +55,7 @@ export const MainLayout = () => {
             switch (e.key.toLowerCase()) {
                 case "f":
                     e.preventDefault();
-                    setSearchOpen(true);
+                    useExplorerStore.getState().addSearchResultsTab([], "");
                     break;
                 case "b":
                     e.preventDefault();
@@ -182,7 +180,7 @@ export const MainLayout = () => {
                         <Plus className="h-4 w-4" />
                     </Button>
 
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSearchOpen(true)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => useExplorerStore.getState().addSearchResultsTab([], "")}>
                         <Search className="h-4 w-4" />
                     </Button>
 
@@ -251,7 +249,6 @@ export const MainLayout = () => {
             {/* Bottom Status Bar */}
             <StatusBar />
 
-            <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
             <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
             <PreviewModal />
             <DeleteQueueModal open={deleteQueueOpen} onOpenChange={setDeleteQueueOpen} />

@@ -1,30 +1,38 @@
-import { useRef, useEffect, useState, useCallback } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, FileText, Loader2, X, ExternalLink, ListPlus, ListMinus, FolderInput, Play } from "lucide-react";
-import { useExplorerStore } from "@/stores/explorerStore";
-import { FileEntry, SearchResult } from "@/types/explorer";
-import { useSidebarStore } from "@/stores/sidebarStore";
-import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
-import { useMoveQueueStore } from "@/stores/moveQueueStore";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { toast } from "sonner";
-import { SearchBreadcrumbs } from "./search/SearchBreadcrumbs";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { homeDir } from "@tauri-apps/api/path";
+import { Input } from "@/components/ui/input";
 import {
     Select,
     SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
     SelectGroup,
-    SelectLabel
+    SelectItem,
+    SelectLabel,
+    SelectSeparator,
+    SelectTrigger,
+    SelectValue
 } from "@/components/ui/select";
-import { FilePreviewContent } from "./FilePreviewContent";
+import {
+    ARCHIVE_EXTENSIONS,
+    AUDIO_EXTENSIONS,
+    DOCUMENT_EXTENSIONS,
+    IMAGE_EXTENSIONS,
+    TEXT_EXTENSIONS,
+    VIDEO_EXTENSIONS
+} from "@/lib/fileTypes";
 import { cn } from "@/lib/utils";
+import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
+import { useExplorerStore } from "@/stores/explorerStore";
+import { useMoveQueueStore } from "@/stores/moveQueueStore";
+import { useSidebarStore } from "@/stores/sidebarStore";
+import { FileEntry, SearchResult } from "@/types/explorer";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { homeDir } from "@tauri-apps/api/path";
+import { ExternalLink, FileText, FolderInput, ListMinus, ListPlus, Loader2, Play, RefreshCw, Search, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { FilePreviewContent } from "./FilePreviewContent";
+import { SearchBreadcrumbs } from "./search/SearchBreadcrumbs";
 import { SearchResultRow } from "./search/SearchResultRow";
 
 const ROW_ESTIMATE = 52;
@@ -34,7 +42,6 @@ const BATCH_FLUSH_SIZE = 80;
 
 interface SearchMainViewProps {
     isTab?: boolean;
-    tabId?: string;
     initialQuery?: string;
     initialResults?: SearchResult[];
     initialVolume?: string;
@@ -43,7 +50,6 @@ interface SearchMainViewProps {
 }
 
 export const SearchMainView = ({
-    tabId,
     isTab = false,
     initialQuery = "",
     initialResults = [],
@@ -78,13 +84,12 @@ export const SearchMainView = ({
     const [query, setQuery] = useState(initialQuery);
     const [results, setResults] = useState<SearchResult[]>(initialResults);
     const [searching, setSearching] = useState(false);
-    const [searchId, setSearchId] = useState<string | null>(null);
+    // Keep a ref always in sync with the current search ID so cancelSearch never captures a stale value
+    const searchIdRef = useRef<string | null>(null);
 
     const [searchType, setSearchType] = useState<"file" | "content">("file");
     const [itemType, setItemType] = useState<string>("both");
     const [selectedVolume, setSelectedVolume] = useState<string>(initialVolume || activeTab?.path || "/");
-    const [maxDepth, setMaxDepth] = useState<number | "">("");
-    const [resultLimit, setResultLimit] = useState<number | "">("");
 
     const [selectedResultIndex, setSelectedResultIndex] = useState<number>(initialResults.length > 0 ? 0 : -1);
     const selectedResult = selectedResultIndex >= 0 ? results[selectedResultIndex] : null;
@@ -153,19 +158,24 @@ export const SearchMainView = ({
     });
 
     const cancelSearch = useCallback(async () => {
-        if (searchId) {
-            await invoke("cancel_operation", { operation_id: searchId });
+        const id = searchIdRef.current;
+        if (id) {
+            await invoke("cancel_operation", { operation_id: id });
             setSearching(false);
-            setSearchId(null);
+            searchIdRef.current = null;
         }
-    }, [searchId]);
+    }, []); // no deps — always reads from ref
 
-    const startSearch = async () => {
+    const startSearch = useCallback(async () => {
         if (!query) return;
-        await cancelSearch();
+        // Cancel existing search first (using ref so we always get the current ID)
+        const existingId = searchIdRef.current;
+        if (existingId) {
+            await invoke("cancel_operation", { operation_id: existingId }).catch(() => { });
+        }
 
         const newSearchId = crypto.randomUUID();
-        setSearchId(newSearchId);
+        searchIdRef.current = newSearchId;
         setSearching(true);
         setResults([]);
         setSelectedResultIndex(-1);
@@ -184,39 +194,63 @@ export const SearchMainView = ({
             setResults((prev) => [...prev, ...batch]);
         };
 
-        const unlisten = await listen<SearchResult>("search_result", (event) => {
-            buffer.push(event.payload);
-            if (buffer.length >= BATCH_FLUSH_SIZE) {
-                flush();
-            } else if (!flushTimer) {
-                flushTimer = setTimeout(flush, BATCH_FLUSH_MS);
-            }
-        });
+        let unlistenResult: (() => void) | null = null;
+        let unlistenComp: (() => void) | null = null;
 
-        const unlistenCompleted = await listen<string>("search_completed", (event) => {
-            if (event.payload === newSearchId) {
-                flush();
-                setSearching(false);
-                unlisten();
-                unlistenCompleted();
-            }
-        });
+        try {
+            unlistenResult = await listen<SearchResult>("search_result", (event) => {
+                buffer.push(event.payload);
+                if (buffer.length >= BATCH_FLUSH_SIZE) {
+                    flush();
+                } else if (!flushTimer) {
+                    flushTimer = setTimeout(flush, BATCH_FLUSH_MS);
+                }
+            });
 
-        const searchOptions = {
-            maxDepth: maxDepth === "" ? undefined : (maxDepth === 0 ? 1 : Number(maxDepth)),
-            resultLimit: resultLimit === "" ? undefined : Number(resultLimit) || undefined,
-            itemType: itemType,
-        };
+            unlistenComp = await listen<string>("search_completed", (event) => {
+                if (event.payload === newSearchId) {
+                    flush();
+                    setSearching(false);
+                    searchIdRef.current = null;
+                    if (unlistenResult) unlistenResult();
+                    if (unlistenComp) unlistenComp();
+                }
+            });
 
-        const cmd = searchType === "file" ? "start_file_search" : "start_content_search";
+            const getExtensions = () => {
+                switch (itemType) {
+                    case "images": return IMAGE_EXTENSIONS;
+                    case "videos": return VIDEO_EXTENSIONS;
+                    case "audio": return AUDIO_EXTENSIONS;
+                    case "documents": return DOCUMENT_EXTENSIONS;
+                    case "archives": return ARCHIVE_EXTENSIONS;
+                    case "text": return TEXT_EXTENSIONS;
+                    default: return undefined;
+                }
+            };
 
-        await invoke(cmd, {
-            searchId: newSearchId,
-            root: selectedVolume,
-            pattern: query,
-            ...searchOptions
-        });
-    };
+            const searchOptions = {
+                itemType: (itemType === "file" || itemType === "folder" || itemType === "both") ? itemType : "file",
+                extensions: getExtensions(),
+            };
+
+            const cmd = searchType === "file" ? "start_file_search" : "start_content_search";
+
+            await invoke(cmd, {
+                searchId: newSearchId,
+                root: selectedVolume,
+                pattern: query,
+                ...searchOptions
+            });
+        } catch (error) {
+            console.error("Search failed:", error);
+            toast.error("Search operation failed");
+            setSearching(false);
+            searchIdRef.current = null;
+            if (unlistenResult) unlistenResult();
+            if (unlistenComp) unlistenComp();
+        }
+    }, [query, searchType, itemType, selectedVolume]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -243,9 +277,10 @@ export const SearchMainView = ({
     // Cleanup on unmount
     useEffect(() => {
         return () => {
-            if (searchId) invoke("cancel_operation", { operation_id: searchId }).catch(() => { });
+            const id = searchIdRef.current;
+            if (id) invoke("cancel_operation", { operation_id: id }).catch(() => { });
         };
-    }, [searchId]);
+    }, []);
 
     // Keep selected move queue valid
     useEffect(() => {
@@ -255,7 +290,7 @@ export const SearchMainView = ({
     }, [moveQueues, selectedMoveQueueId]);
 
     return (
-        <div className="flex-1 flex flex-col overflow-hidden outline-none bg-background/95">
+        <div className="w-full h-full flex flex-col overflow-hidden outline-none bg-background/95 selection:bg-primary/20">
             <div className="px-4 py-3 flex flex-wrap gap-4 items-end border-b bg-muted/10">
                 <div className="w-1/4 min-w-[300px] space-y-1.5">
                     <div className="flex justify-between items-center">
@@ -351,41 +386,24 @@ export const SearchMainView = ({
                                 <SelectItem value="both">Both</SelectItem>
                                 <SelectItem value="file">Files</SelectItem>
                                 <SelectItem value="folder">Folders</SelectItem>
+                                <SelectSeparator className="my-1 opacity-20" />
+                                <SelectItem value="images">Images</SelectItem>
+                                <SelectItem value="videos">Videos</SelectItem>
+                                <SelectItem value="audio">Audio</SelectItem>
+                                <SelectItem value="documents">Documents</SelectItem>
+                                <SelectItem value="archives">Archives</SelectItem>
+                                <SelectItem value="text">Code/Text</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>
 
-                    <div className="flex items-center gap-2 h-10">
-                        <div className="flex flex-col gap-1">
-                            <label className="text-[9px] text-muted-foreground text-center">Depth</label>
-                            <Input
-                                type="number"
-                                min={0}
-                                placeholder="all"
-                                className="w-14 h-7 text-[11px] text-center"
-                                value={maxDepth === "" ? "" : maxDepth}
-                                onChange={(e) => setMaxDepth(e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value, 10) || 0))}
-                            />
-                        </div>
-                        <div className="flex flex-col gap-1">
-                            <label className="text-[9px] text-muted-foreground text-center">Limit</label>
-                            <Input
-                                type="number"
-                                min={1}
-                                placeholder="10k"
-                                className="w-14 h-7 text-[11px] text-center"
-                                value={resultLimit === "" ? "" : resultLimit}
-                                onChange={(e) => setResultLimit(e.target.value === "" ? "" : Math.max(1, parseInt(e.target.value, 10) || 1))}
-                            />
-                        </div>
-                    </div>
 
                     <Button
                         className="h-8 px-5 text-xs font-bold shadow-lg shadow-primary/20 transition-all"
                         onClick={startSearch}
-                        disabled={searching}
+                        disabled={!query}
                     >
-                        {searching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><Search className="w-3.5 h-3.5 mr-2" /> Search</>}
+                        {searching ? <><RefreshCw className="w-3.5 h-3.5 mr-2 animate-spin" />Re-Search</> : <><Search className="w-3.5 h-3.5 mr-2" /> Search</>}
                     </Button>
                     {!isTab && (
                         <Button
@@ -414,21 +432,31 @@ export const SearchMainView = ({
             </div>
 
             {/* Top Toolbar for Tab - Breadcrumbs */}
-            {isTab && tabId && (
+            {/* {isTab && tabId && (
                 <div className="px-4 py-1 border-b bg-muted/20 flex items-center justify-between">
                     <Breadcrumbs tabId={tabId} />
                 </div>
-            )}
+            )} */}
 
             <div className="flex-1 flex overflow-hidden min-h-0">
                 {/* Left: Results List (Main Area) */}
-                <div className="flex-1 border-r flex flex-col relative bg-muted/5 min-w-0">
+                <div className="flex-1 border-r flex flex-col relative bg-muted/5 min-w-0 min-h-0">
                     {/* Header for results with breadcrumbs */}
                     {isTab && (
-                        <div className="px-4 py-2 border-b bg-muted/10 flex items-center justify-between">
+                        <div className="px-4 py-2 border-b bg-muted/10 flex items-center justify-between shrink-0">
                             <div className="flex items-center gap-2">
                                 <Search className="w-3.5 h-3.5 text-primary/70" />
                                 <span className="text-[10px] uppercase font-black tracking-tighter opacity-70">Results Overview</span>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5 hover:bg-muted"
+                                    onClick={startSearch}
+                                    disabled={searching || !query}
+                                    title="Refresh Search"
+                                >
+                                    <RefreshCw className={cn("w-3 h-3 text-muted-foreground", searching && "animate-spin")} />
+                                </Button>
                             </div>
                             <div className="shrink-0">
                                 {results.length > 0 && (
@@ -485,27 +513,26 @@ export const SearchMainView = ({
                 </div>
 
                 {/* Right: Preview Pane */}
-                <div className="flex-1 bg-background flex flex-col relative overflow-hidden">
+                <div className="flex-1 bg-background flex flex-col relative overflow-hidden min-h-0">
                     {selectedResult ? (
-                        <div className="flex-1 flex overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                            {/* Central Preview Content */}
-                            <div className="flex-1 flex flex-col bg-muted/20 relative group/preview border-r">
-                                <div className="flex-1 min-h-0 flex items-center justify-center bg-muted/30">
+                        <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 min-h-0">
+                            {/* Top: Preview Content */}
+                            <div className="flex-1 flex flex-col bg-muted/20 relative group/preview border-b min-h-0">
+                                <div className="flex-1 h-full min-h-0 flex items-center justify-center bg-muted/30 overflow-hidden">
                                     <FilePreviewContent
                                         path={selectedResult.path}
                                         extension={selectedResult.name.split('.').pop() || ""}
                                         name={selectedResult.name}
                                         is_dir={selectedResult.is_dir}
-                                        section="content_search"
+                                        section={isTab ? "explorer" : "content_search"}
                                     />
                                 </div>
                             </div>
 
-                            {/* Standard Metadata Sidebar (Right) */}
-                            <div className="w-[300px] flex flex-col bg-muted/5 overflow-hidden">
+                            {/* Bottom: Standard Metadata/Actions Sidebar */}
+                            <div className="h-[280px] flex flex-col bg-muted/5 overflow-hidden shrink-0">
                                 <div className="p-4 border-b bg-muted/20">
                                     <div className="flex flex-col gap-1.5 min-w-0">
-                                        <span className="text-[9px] uppercase text-muted-foreground font-black tracking-widest">Selected Item</span>
                                         <h3 className="text-base font-black truncate tracking-tighter leading-tight text-foreground">{selectedResult.name}</h3>
                                         <div className="mt-1">
                                             <SearchBreadcrumbs path={selectedResult.path} onNavigate={handleNavigateToFolder} />
@@ -517,111 +544,75 @@ export const SearchMainView = ({
                                     {/* Actions Section */}
                                     <div className="space-y-3">
                                         <span className="text-[9px] uppercase text-muted-foreground font-black tracking-widest block mb-2">Actions</span>
-                                        <div className="grid grid-cols-2 gap-2">
+                                        <div className="grid grid-cols-3 gap-2">
                                             <Button
                                                 variant="outline"
                                                 size="sm"
-                                                className="h-8 text-[10px] font-bold gap-1.5"
+                                                className="h-8 text-[9px] font-bold gap-1 px-1"
                                                 onClick={() => handleOpenInFinder(selectedResult.path)}
                                             >
-                                                <ExternalLink className="w-3.5 h-3.5" />
+                                                <ExternalLink className="w-3 h-3" />
                                                 REVEAL
                                             </Button>
                                             <Button
                                                 variant="outline"
                                                 size="sm"
-                                                className="h-8 text-[10px] font-bold gap-1.5 text-primary"
+                                                className="h-8 text-[9px] font-bold gap-1 text-primary px-1"
                                                 onClick={() => handleOpenItem(selectedResult.path)}
                                             >
-                                                <Play className="w-3.5 h-3.5" />
+                                                <Play className="w-3 h-3" />
                                                 OPEN
                                             </Button>
-                                        </div>
-
-                                        <div className="space-y-2">
                                             <Button
                                                 variant={isInDeleteQueue ? "destructive" : "outline"}
                                                 size="sm"
                                                 className={cn(
-                                                    "w-full h-9 text-[11px] font-bold gap-2 justify-start px-4",
+                                                    "h-8 text-[9px] font-bold gap-1 justify-center px-1",
                                                     isInDeleteQueue && "bg-destructive/10 border-destructive/30 text-destructive"
                                                 )}
                                                 onClick={handleToggleDelete}
                                             >
-                                                {isInDeleteQueue ? <ListMinus className="w-4 h-4" /> : <ListPlus className="w-4 h-4" />}
-                                                {isInDeleteQueue ? "Queue Delete" : "Queue Delete"}
+                                                {isInDeleteQueue ? <ListMinus className="w-3 h-3" /> : <ListPlus className="w-3 h-3" />}
+                                                DELETE
                                             </Button>
+                                        </div>
 
-                                            <div className="space-y-2">
-                                                <Button
-                                                    variant={isInMoveQueue ? "default" : "outline"}
-                                                    size="sm"
-                                                    className={cn(
-                                                        "w-full h-9 text-[11px] font-bold gap-2 justify-start px-4",
-                                                        isInMoveQueue && "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
-                                                    )}
-                                                    onClick={handleToggleMove}
-                                                    disabled={!selectedMoveQueueId && !isInMoveQueue}
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <div className="col-span-2">
+                                                <Select
+                                                    value={selectedMoveQueueId}
+                                                    onValueChange={setSelectedMoveQueueId}
+                                                    disabled={isInMoveQueue || moveQueues.length === 0}
                                                 >
-                                                    {isInMoveQueue ? <ListMinus className="w-4 h-4" /> : <FolderInput className="w-4 h-4" />}
-                                                    {isInMoveQueue ? "Queue Move" : "Queue Move"}
-                                                </Button>
-                                                {!isInMoveQueue && moveQueues.length > 0 && (
-                                                    <div className="px-1">
-                                                        <Select value={selectedMoveQueueId} onValueChange={setSelectedMoveQueueId}>
-                                                            <SelectTrigger className="w-full h-8 text-[10px] bg-background">
-                                                                <SelectValue placeholder="To Queue" />
-                                                            </SelectTrigger>
-                                                            <SelectContent side="bottom" align="center">
-                                                                {moveQueues.map((q) => (
-                                                                    <SelectItem key={q.id} value={q.id} className="text-[10px]">
-                                                                        {q.name} ({q.items.length})
-                                                                    </SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
+                                                    <SelectTrigger className="w-full h-8 text-[10px] bg-background">
+                                                        <SelectValue placeholder={moveQueues.length > 0 ? "Target Queue" : "No Queues"} />
+                                                    </SelectTrigger>
+                                                    <SelectContent side="bottom" align="center">
+                                                        {moveQueues.map((q) => (
+                                                            <SelectItem key={q.id} value={q.id} className="text-[10px]">
+                                                                {q.name} ({q.items.length})
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <Button
+                                                variant={isInMoveQueue ? "default" : "outline"}
+                                                size="sm"
+                                                className={cn(
+                                                    "col-span-1 h-8 text-[9px] font-bold gap-1 justify-center px-1",
+                                                    isInMoveQueue && "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
                                                 )}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Detailed Metadata */}
-                                    <div className="space-y-4 pt-4 border-t">
-                                        <div className="flex flex-col gap-1.5">
-                                            <span className="text-[9px] uppercase text-muted-foreground font-black tracking-widest">Direct Path</span>
-                                            <span
-                                                className="text-[10px] break-all font-mono opacity-80 bg-muted/30 p-2.5 rounded border border-muted-foreground/10 leading-relaxed cursor-pointer hover:bg-muted/50 transition-colors"
-                                                onClick={() => {
-                                                    navigator.clipboard.writeText(selectedResult.path);
-                                                    toast.success("Path copied to clipboard");
-                                                }}
+                                                onClick={handleToggleMove}
+                                                disabled={!selectedMoveQueueId && !isInMoveQueue}
                                             >
-                                                {selectedResult.path}
-                                            </span>
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-3 pt-2">
-                                            <div className="p-2 rounded bg-muted/20 border border-muted-foreground/5 flex flex-col items-center">
-                                                <span className="text-[8px] uppercase text-muted-foreground font-bold">Size</span>
-                                                <span className="text-[10px] font-mono font-bold mt-1">
-                                                    {selectedResult.size !== null ? `${Math.round(selectedResult.size / 1024)} KB` : "N/A"}
-                                                </span>
-                                            </div>
-                                            <div className="p-2 rounded bg-muted/20 border border-muted-foreground/5 flex flex-col items-center">
-                                                <span className="text-[8px] uppercase text-muted-foreground font-bold">Type</span>
-                                                <span className="text-[10px] font-mono font-bold mt-1 uppercase">
-                                                    {selectedResult.is_dir ? "Folder" : (selectedResult.name.split('.').pop() || "File")}
-                                                </span>
-                                            </div>
-                                            {selectedResult.line_number !== undefined && (
-                                                <div className="col-span-2 p-2 rounded bg-primary/5 border border-primary/20 flex flex-col items-center">
-                                                    <span className="text-[8px] uppercase text-primary font-bold">Matching Line</span>
-                                                    <span className="text-[10px] font-mono font-bold mt-1 text-primary">Row {selectedResult.line_number}</span>
-                                                </div>
-                                            )}
+                                                {isInMoveQueue ? <ListMinus className="w-3 h-3" /> : <FolderInput className="w-3 h-3" />}
+                                                MOVE
+                                            </Button>
                                         </div>
                                     </div>
+
+
                                 </div>
                             </div>
                         </div>

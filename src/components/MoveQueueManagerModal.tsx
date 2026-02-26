@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,7 @@ interface MoveQueueManagerModalProps {
 type SelectedFile = { queueId: string; path: string };
 
 export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueManagerModalProps) => {
-    const { queues, updateQueue, removeQueue, clearQueue, moveItemToQueue } = useMoveQueueStore();
+    const { queues, updateQueue, removeQueue, moveItemToQueue } = useMoveQueueStore();
     const refresh = useExplorerStore((s) => s.refresh);
     const tabs = useExplorerStore((s) => s.tabs);
 
@@ -91,18 +91,29 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
     };
 
     const [moveProgress, setMoveProgress] = useState<{ processed: number; total: number } | null>(null);
+    // Track counts for toast summary
+    const moveSuccessCount = useRef(0);
 
     const handleMoveAll = async (queueId: string) => {
         const queue = useMoveQueueStore.getState().getQueue(queueId);
         if (!queue || queue.items.length === 0) return;
         if (!queue.folderPath) {
-            toast.error(`Destination folder is unset for queue "${queue.name}"`);
+            toast.error(`Destination folder is unset for queue "${queue.name}". Click the folder icon to set one.`);
             return;
         }
         setMovingQueueId(queueId);
         const operationId = crypto.randomUUID();
+        moveSuccessCount.current = 0;
 
-        const unlisten = listen("batch_progress", (event: any) => {
+        // Listen for per-item success: remove from queue in real-time
+        const unlistenItemDone = await listen<{ operation_id: string; path: string }>("batch_item_completed", (event) => {
+            if (event.payload.operation_id === operationId) {
+                useMoveQueueStore.getState().removeFromQueue(queueId, event.payload.path);
+                moveSuccessCount.current++;
+            }
+        });
+
+        const unlistenProgress = await listen("batch_progress", (event: any) => {
             const data = event.payload;
             if (data.operation_id === operationId) {
                 setMoveProgress({
@@ -118,17 +129,28 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
                 sources: queue.items.map((e) => e.path),
                 destinationDir: queue.folderPath,
             });
-            clearQueue(queueId);
+            // Refresh all explorer AND search_results tabs
             tabs.forEach((tab) => {
-                if (tab.type === "explorer") refresh(tab.id);
+                if (tab.type === "explorer" || tab.type === "search_results") refresh(tab.id);
             });
-            toast.success(`Moved ${queue.items.length} item(s) to ${queue.folderPath}`);
+            const count = moveSuccessCount.current;
+            if (count > 0) toast.success(`Moved ${count} item(s) to ${queue.folderPath}`);
         } catch (e) {
-            toast.error(`Move failed: ${e}`);
+            const count = moveSuccessCount.current;
+            if (count > 0) {
+                toast.warning(`Moved ${count} item(s); some failed.`);
+            } else {
+                toast.error(`Move failed: ${e}`);
+            }
+            // Refresh tabs for the ones that did succeed
+            tabs.forEach((tab) => {
+                if (tab.type === "explorer" || tab.type === "search_results") refresh(tab.id);
+            });
         } finally {
             setMovingQueueId(null);
             setMoveProgress(null);
-            unlisten.then(u => u());
+            unlistenItemDone();
+            unlistenProgress();
         }
     };
 
@@ -265,6 +287,7 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
                                                             className="h-7 text-xs"
                                                             disabled={q.items.length === 0 || movingQueueId !== null || !q.folderPath}
                                                             onClick={!q.folderPath ? undefined : () => handleMoveAll(q.id)}
+                                                            title={!q.folderPath ? "Set a destination folder first (click the folder icon)" : `Move all ${q.items.length} item(s) to ${q.folderPath}`}
                                                         >
                                                             {movingQueueId === q.id ? (
                                                                 <div className="flex items-center gap-1.5 min-w-[60px] justify-center">
@@ -275,6 +298,8 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
                                                                         </span>
                                                                     )}
                                                                 </div>
+                                                            ) : !q.folderPath ? (
+                                                                <span className="opacity-60">Set dest…</span>
                                                             ) : (
                                                                 "Move all"
                                                             )}

@@ -41,6 +41,7 @@ pub async fn start_file_search(
     max_depth: Option<u32>,
     result_limit: Option<usize>,
     item_type: Option<String>,
+    extensions: Option<Vec<String>>,
 ) -> Result<(), String> {
     let cancel_flag = register_operation(search_id.clone());
     let pattern = pattern.to_lowercase();
@@ -71,6 +72,22 @@ pub async fn start_file_search(
                 Some(n) => n,
                 None => continue,
             };
+
+            // Filter out Mac metadata and GIFs (as requested)
+            if name.starts_with("._") || name.to_lowercase().ends_with(".gif") {
+                continue;
+            }
+
+            // Apply extension filtering if provided
+            if let Some(ref exts) = extensions {
+                if !is_dir {
+                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                    if !exts.iter().any(|e| e.to_lowercase() == ext) {
+                        continue;
+                    }
+                }
+            }
+
             if name.to_lowercase().contains(&pattern) {
                 let c = count.fetch_add(1, Ordering::Relaxed);
                 if c >= limit {
@@ -138,6 +155,7 @@ pub async fn start_content_search(
     max_depth: Option<u32>,
     result_limit: Option<usize>,
     item_type: Option<String>,
+    extensions: Option<Vec<String>>,
 ) -> Result<(), String> {
     let cancel_flag = register_operation(search_id.clone());
     let matcher = RegexMatcher::new(&pattern).map_err(|e| e.to_string())?;
@@ -177,6 +195,20 @@ pub async fn start_content_search(
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
+
+            // Filter out Mac metadata and GIFs (as requested)
+            if name.starts_with("._") || name.to_lowercase().ends_with(".gif") {
+                continue;
+            }
+
+            // Apply extension filtering if provided
+            if let Some(ref exts) = extensions {
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                if !exts.iter().any(|e| e.to_lowercase() == ext) {
+                    continue;
+                }
+            }
+
             let mut sink = ContentSearchSink {
                 app: &app,
                 path: path_str,

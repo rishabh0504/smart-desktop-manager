@@ -527,9 +527,11 @@ export const FilePanel = ({ tabId }: FilePanelProps) => {
                         onMouseUp={onMouseUp}
                         onMouseLeave={onMouseUp}
                     >
+                        {/* Slim top loading bar — replaces old full blocking overlay */}
                         {tab.loading && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-50">
-                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                            <div className="absolute top-0 left-0 right-0 h-0.5 z-50 overflow-hidden">
+                                <div className="h-full bg-primary animate-pulse" style={{ animation: 'loading-bar 1s ease-in-out infinite' }} />
+                                <style>{`@keyframes loading-bar { 0% { width: 0%; margin-left: 0%; } 50% { width: 60%; margin-left: 20%; } 100% { width: 0%; margin-left: 100%; } }`}</style>
                             </div>
                         )}
 

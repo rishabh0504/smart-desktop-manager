@@ -40,6 +40,20 @@ pub struct BatchProgress {
     pub progress: f64,
 }
 
+/// Emitted for each successfully completed item so frontend can dequeue in real-time.
+#[derive(Serialize, Clone)]
+pub struct BatchItemCompleted {
+    pub operation_id: String,
+    pub path: String,
+}
+
+/// Emitted when the batch finishes (with or without errors).
+#[derive(Serialize, Clone)]
+pub struct BatchFinished {
+    pub operation_id: String,
+    pub failed_paths: Vec<String>,
+}
+
 #[tauri::command]
 pub async fn delete_items(
     app: AppHandle,
@@ -50,27 +64,30 @@ pub async fn delete_items(
     let cancel_flag = register_operation(operation_id.clone());
     let processed_count = std::sync::atomic::AtomicUsize::new(0);
     let last_emit = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+    // Collect failed paths so frontend knows which ones to keep in queue.
+    let failed_paths = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
 
     let op_id = operation_id.clone();
     let app_clone = app.clone();
-    
-    let res = tokio::task::spawn_blocking(move || {
-        paths.par_iter().try_for_each(|path| {
+    let failed_clone = failed_paths.clone();
+
+    tokio::task::spawn_blocking(move || {
+        paths.par_iter().for_each(|path| {
             if cancel_flag.load(Ordering::Relaxed) {
-                return Err("Operation cancelled".to_string());
+                return;
             }
 
             let p = PathBuf::from(path);
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
-            
+
             let count = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
-            
-            // Throttle progress events to once every 100ms or for the last item
+
+            // Throttle bulk progress events (for the progress bar)
             let mut last_emit_lock = last_emit.lock().unwrap();
             if last_emit_lock.elapsed().as_millis() > 100 || count == total_items {
                 let _ = app_clone.emit("batch_progress", BatchProgress {
                     operation_id: op_id.clone(),
-                    current_item: name,
+                    current_item: name.clone(),
                     processed_items: count,
                     total_items,
                     progress: (count as f64 / total_items as f64) * 100.0,
@@ -79,36 +96,53 @@ pub async fn delete_items(
             }
             drop(last_emit_lock);
 
-            if p.exists() {
+            let ok = if p.exists() {
                 if p.is_dir() {
                     #[cfg(target_os = "macos")]
                     {
-                        // On macOS, rm -rf is often much faster for deep trees than recursive std::fs removal
                         let status = std::process::Command::new("rm")
                             .arg("-rf")
                             .arg(&p)
                             .status();
-                        if status.is_err() || !status.unwrap().success() {
-                            let _ = std::fs::remove_dir_all(&p);
-                        }
+                        status.is_ok() && status.unwrap().success()
+                            || std::fs::remove_dir_all(&p).is_ok()
                     }
                     #[cfg(not(target_os = "macos"))]
                     {
-                        let _ = std::fs::remove_dir_all(&p);
+                        std::fs::remove_dir_all(&p).is_ok()
                     }
                 } else {
-                    let _ = std::fs::remove_file(&p);
+                    std::fs::remove_file(&p).is_ok()
                 }
+            } else {
+                // File doesn't exist — treat as "already gone" = success
+                true
+            };
+
+            if ok {
+                // Notify frontend: this specific item was successfully deleted
+                let _ = app_clone.emit("batch_item_completed", BatchItemCompleted {
+                    operation_id: op_id.clone(),
+                    path: path.clone(),
+                });
+            } else {
+                failed_clone.lock().unwrap().push(path.clone());
             }
-            Ok(())
-        })
+        });
     }).await.map_err(|e| e.to_string())?;
 
+    let failed = failed_paths.lock().unwrap().clone();
+    let _ = app.emit("batch_finished", BatchFinished {
+        operation_id: operation_id.clone(),
+        failed_paths: failed.clone(),
+    });
     unregister_operation(&operation_id);
-    if res.is_ok() {
-        let _ = app.emit("batch_completed", operation_id);
+
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} item(s) failed to delete", failed.len()))
     }
-    res
 }
 
 #[tauri::command]
@@ -138,7 +172,7 @@ pub async fn batch_copy(
             let target_path = unique_dest_path(&dest_path, file_name);
 
             let count = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
-            
+
             // Throttle progress events to once every 100ms or for the last item
             let mut last_emit_lock = last_emit.lock().unwrap();
             if last_emit_lock.elapsed().as_millis() > 100 || count == total_items {
@@ -186,13 +220,16 @@ pub async fn batch_move(
 
     let processed_count = std::sync::atomic::AtomicUsize::new(0);
     let last_emit = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+    let failed_paths = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
 
     let op_id = operation_id.clone();
     let app_clone = app.clone();
-    let res = tokio::task::spawn_blocking(move || {
-        sources.par_iter().try_for_each(|src| {
+    let failed_clone = failed_paths.clone();
+
+    tokio::task::spawn_blocking(move || {
+        sources.par_iter().for_each(|src| {
             if cancel_flag.load(Ordering::Relaxed) {
-                return Err("Operation cancelled".to_string());
+                return;
             }
 
             let src_path = PathBuf::from(src);
@@ -200,8 +237,8 @@ pub async fn batch_move(
             let target_path = unique_dest_path(&dest_path, file_name);
 
             let count = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
-            
-            // Throttle progress events to once every 100ms or for the last item
+
+            // Throttle progress events
             let mut last_emit_lock = last_emit.lock().unwrap();
             if last_emit_lock.elapsed().as_millis() > 100 || count == total_items {
                 let _ = app_clone.emit("batch_progress", BatchProgress {
@@ -215,38 +252,52 @@ pub async fn batch_move(
             }
             drop(last_emit_lock);
 
-            if src_path.is_dir() {
-                // Attempt atomic rename first
-                if std::fs::rename(&src_path, &target_path).is_err() {
+            let ok = if src_path.is_dir() {
+                if std::fs::rename(&src_path, &target_path).is_ok() {
+                    true
+                } else {
                     let mut opts = fs_extra::dir::CopyOptions::new();
                     opts.overwrite = false;
                     if fs_extra::dir::copy(&src_path, &target_path, &opts).is_ok() {
-                        let _ = std::fs::remove_dir_all(&src_path);
+                        std::fs::remove_dir_all(&src_path).is_ok()
                     } else {
-                        eprintln!("Failed to copy directory: {:?}", src_path);
-                        return Err(format!("Failed to move directory: {:?}", src_path));
+                        false
                     }
                 }
             } else {
-                // Attempt atomic rename first
-                if std::fs::rename(&src_path, &target_path).is_err() {
+                if std::fs::rename(&src_path, &target_path).is_ok() {
+                    true
+                } else {
                     let mut opts = fs_extra::file::CopyOptions::new();
                     opts.overwrite = false;
-                    if let Err(e) = fs_extra::file::move_file(&src_path, &target_path, &opts) {
-                        eprintln!("Failed to move file {:?}: {:?}", src_path, e);
-                        return Err(format!("Failed to move file {:?}: {:?}", src_path, e));
-                    }
+                    fs_extra::file::move_file(&src_path, &target_path, &opts).is_ok()
                 }
+            };
+
+            if ok {
+                // Notify frontend: this specific item was successfully moved
+                let _ = app_clone.emit("batch_item_completed", BatchItemCompleted {
+                    operation_id: op_id.clone(),
+                    path: src.clone(),
+                });
+            } else {
+                failed_clone.lock().unwrap().push(src.clone());
             }
-            Ok(())
-        })
+        });
     }).await.map_err(|e| e.to_string())?;
 
+    let failed = failed_paths.lock().unwrap().clone();
+    let _ = app.emit("batch_finished", BatchFinished {
+        operation_id: operation_id.clone(),
+        failed_paths: failed.clone(),
+    });
     unregister_operation(&operation_id);
-    if res.is_ok() {
-        let _ = app.emit("batch_completed", operation_id);
+
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} item(s) failed to move", failed.len()))
     }
-    res
 }
 
 #[tauri::command]

@@ -16,12 +16,13 @@ export function SearchResultsPanel({ tabId }: SearchResultsPanelProps) {
     const results = (tab.entries || []) as SearchResult[];
 
     return (
-        <SearchMainView
-            isTab={true}
-            tabId={tabId}
-            initialQuery={query}
-            initialResults={results}
-            initialVolume={tab.path.startsWith("search://") ? undefined : tab.path} // Default to root or tab path
-        />
+        <div className="w-full h-full">
+            <SearchMainView
+                isTab={true}
+                initialQuery={query}
+                initialResults={results}
+                initialVolume={tab.path.startsWith("search://") ? undefined : tab.path} // Default to root or tab path
+            />
+        </div>
     );
 }

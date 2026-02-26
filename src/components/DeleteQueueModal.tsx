@@ -10,7 +10,6 @@ import { listen } from "@tauri-apps/api/event";
 import { Trash2, FileText, FileQuestion, Folder, Loader2, X, ChevronUp, ChevronDown, ArrowRightLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { isVideoExtension } from "@/lib/fileTypes";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useMoveQueueStore } from "@/stores/moveQueueStore";
 import {
@@ -20,114 +19,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-
-function PreviewPane({ entry }: { entry: FileEntry | null }) {
-    const [content, setContent] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (!entry) {
-            setContent(null);
-            setError(null);
-            return;
-        }
-        if (entry.is_dir) {
-            setContent(null);
-            setError("Folder — no preview");
-            setLoading(false);
-            return;
-        }
-
-        setLoading(true);
-        setError(null);
-        const ext = (entry.extension ?? "").toLowerCase();
-        const isText = ["txt", "md", "js", "ts", "json", "rs", "css", "html", "py", "sh", "yml", "yaml"].includes(ext);
-        const isPdf = ext === "pdf";
-        const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext);
-        const isVideo = isVideoExtension(ext);
-        const isAudio = ["mp3", "wav", "ogg", "flac"].includes(ext);
-
-        if (isText) {
-            invoke<string>("get_file_text_content", { path: entry.path })
-                .then(setContent)
-                .catch((e: unknown) => setError(String(e)))
-                .finally(() => setLoading(false));
-        } else if (isPdf) {
-            invoke<string>("get_file_base64_content", { path: entry.path })
-                .then(setContent)
-                .catch((e: unknown) => setError(String(e)))
-                .finally(() => setLoading(false));
-        } else if (isImage || isVideo || isAudio) {
-            setContent(`vmedia://localhost/${encodeURIComponent(entry.path)}`);
-            setLoading(false);
-        } else {
-            setLoading(false);
-        }
-    }, [entry?.path]);
-
-    if (!entry) {
-        return (
-            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground text-sm border-l bg-gradient-to-b from-muted/5 to-muted/15">
-                <FileQuestion className="w-14 h-14 mb-3 opacity-30" />
-                <p className="font-medium">Select an item to preview</p>
-                <p className="text-xs mt-1 opacity-80">Use the list or ↑ ↓ to choose</p>
-            </div>
-        );
-    }
-
-    const ext = (entry.extension ?? "").toLowerCase();
-    const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext);
-    const isVideo = isVideoExtension(ext);
-    const isAudio = ["mp3", "wav", "ogg", "flac"].includes(ext);
-    const isText = ["txt", "md", "js", "ts", "json", "rs", "css", "html", "py", "sh", "yml", "yaml"].includes(ext);
-    const isPdf = ext === "pdf";
-    const mediaSrc = content && (isImage || isVideo || isAudio) ? content : null;
-
-    return (
-        <div className="flex-1 flex flex-col min-w-0 border-l bg-gradient-to-b from-background to-muted/10">
-            <div className="px-4 py-3 border-b bg-muted/20 text-sm font-semibold truncate shadow-sm" title={entry.path}>
-                {entry.name}
-            </div>
-            <div className="flex-1 overflow-auto flex items-center justify-center p-6">
-                {loading && (
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        <span>Loading...</span>
-                    </div>
-                )}
-                {error && !loading && (
-                    <div className="text-center text-sm text-muted-foreground">{error}</div>
-                )}
-                {isImage && mediaSrc && !loading && (
-                    <img src={mediaSrc} alt={entry.name} className="max-w-full max-h-full object-contain rounded-lg shadow-lg ring-1 ring-black/5" />
-                )}
-                {isVideo && mediaSrc && !loading && (
-                    <video controls src={mediaSrc} className="max-w-full max-h-full rounded-lg shadow-lg ring-1 ring-black/5" muted playsInline />
-                )}
-                {isAudio && mediaSrc && !loading && (
-                    <div className="w-full max-w-md rounded-xl bg-muted/30 p-6 shadow-md">
-                        <audio controls src={mediaSrc} className="w-full" />
-                    </div>
-                )}
-                {isText && content && !loading && (
-                    <div className="w-full h-full font-mono text-xs bg-muted/20 border rounded-xl p-5 overflow-auto whitespace-pre shadow-inner">
-                        {content}
-                    </div>
-                )}
-                {isPdf && content && !loading && (
-                    <embed src={content} type="application/pdf" className="w-full h-full min-h-[400px] rounded-lg shadow-lg" />
-                )}
-                {!isImage && !isVideo && !isAudio && !isText && !isPdf && !loading && !error && (
-                    <div className="text-center text-muted-foreground text-sm rounded-xl bg-muted/20 p-8 border border-dashed">
-                        <FileQuestion className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                        <p>No preview</p>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}
+import { FilePreviewContent } from "./FilePreviewContent";
 
 interface DeleteQueueModalProps {
     open: boolean;
@@ -135,7 +27,7 @@ interface DeleteQueueModalProps {
 }
 
 export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) => {
-    const { queue, removeFromQueue, clearQueue } = useDeleteQueueStore();
+    const { queue, removeFromQueue } = useDeleteQueueStore();
     const refresh = useExplorerStore((s) => s.refresh);
     const tabs = useExplorerStore((s) => s.tabs);
 
@@ -149,6 +41,7 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
     const addManyToMoveQueue = useMoveQueueStore((s) => s.addManyToQueue);
 
     const listRef = useRef<HTMLUListElement>(null);
+    const deleteSuccessCount = useRef(0);
 
     useEffect(() => {
         if (!open) {
@@ -215,8 +108,17 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
         if (queue.length === 0) return;
         setDeleting(true);
         const operationId = crypto.randomUUID();
+        deleteSuccessCount.current = 0;
 
-        const unlisten = listen("batch_progress", (event: any) => {
+        // Listen for real-time per-item success — remove from queue immediately as each item is deleted
+        const unlistenItemDone = await listen<{ operation_id: string; path: string }>("batch_item_completed", (event) => {
+            if (event.payload.operation_id === operationId) {
+                removeFromQueue(event.payload.path);
+                deleteSuccessCount.current++;
+            }
+        });
+
+        const unlistenProgress = await listen("batch_progress", (event: any) => {
             const data = event.payload;
             if (data.operation_id === operationId) {
                 setProgress({
@@ -229,25 +131,51 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
 
         try {
             await invoke("delete_items", { operationId, paths: queue.map((e) => e.path) });
-            clearQueue();
+            // Any remaining queue items are failures — leave them in queue
             onOpenChange(false);
             setConfirmOpen(false);
 
-            // Refresh only relevant explorer tabs (ideally those showing paths we deleted or their parents)
-            // For now, refreshing all explorer tabs is safer but we do it once.
+            // Refresh both explorer and search_results tabs
             tabs.forEach((tab) => {
-                if (tab.type === "explorer") refresh(tab.id);
+                if (tab.type === "explorer" || tab.type === "search_results") refresh(tab.id);
             });
 
-            toast.success(`${queue.length} item(s) deleted`);
+            const count = deleteSuccessCount.current;
+            toast.success(`${count} item(s) deleted`);
         } catch (e) {
-            toast.error(`Delete failed: ${e}`);
+            const count = deleteSuccessCount.current;
+            if (count > 0) {
+                toast.warning(`Deleted ${count} item(s); some failed and remain in queue.`);
+            } else {
+                toast.error(`Delete failed: ${e}`);
+            }
+            // Refresh tabs for the ones that did succeed
+            tabs.forEach((tab) => {
+                if (tab.type === "explorer" || tab.type === "search_results") refresh(tab.id);
+            });
+            setConfirmOpen(false);
         } finally {
             setDeleting(false);
             setProgress(null);
-            unlisten.then(u => u());
+            unlistenItemDone();
+            unlistenProgress();
         }
-    }, [queue, clearQueue, onOpenChange, tabs, refresh]);
+    }, [queue, removeFromQueue, onOpenChange, tabs, refresh]);
+
+    /** Delete a single item directly from the preview pane */
+    const handleDeleteSingle = useCallback(async (entry: FileEntry) => {
+        const operationId = crypto.randomUUID();
+        try {
+            await invoke("delete_items", { operationId, paths: [entry.path] });
+            removeFromQueue(entry.path);
+            tabs.forEach((tab) => {
+                if (tab.type === "explorer" || tab.type === "search_results") refresh(tab.id);
+            });
+            toast.success(`Deleted ${entry.name}`);
+        } catch (e) {
+            toast.error(`Failed to delete ${entry.name}: ${e}`);
+        }
+    }, [removeFromQueue, tabs, refresh]);
 
     const toggleBulk = (path: string) => {
         setBulkSelected(prev => {
@@ -275,6 +203,9 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
         toast.success(`Moved ${itemsToMove.length} items to queue`);
     };
 
+    // Derive extension for the selected entry to pass to FilePreviewContent
+    const selectedExt = selected ? (selected.extension ?? selected.name.split(".").pop() ?? "") : "";
+
     return (
         <>
             <Dialog open={open} onOpenChange={onOpenChange}>
@@ -292,6 +223,7 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
                     </DialogHeader>
 
                     <div className="flex-1 flex min-h-0">
+                        {/* Left: file list */}
                         <div className="w-80 shrink-0 flex flex-col border-r bg-muted/5">
                             <div className="px-3 py-2 border-b flex items-center justify-between bg-muted/10">
                                 <div className="flex items-center gap-2">
@@ -383,7 +315,47 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
                                 )}
                             </ScrollArea>
                         </div>
-                        <PreviewPane entry={selected} />
+
+                        {/* Right: Preview using shared FilePreviewContent */}
+                        <div className="flex-1 flex flex-col min-w-0 border-l bg-gradient-to-b from-background to-muted/10">
+                            {!selected ? (
+                                <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground text-sm bg-gradient-to-b from-muted/5 to-muted/15">
+                                    <FileQuestion className="w-14 h-14 mb-3 opacity-30" />
+                                    <p className="font-medium">Select an item to preview</p>
+                                    <p className="text-xs mt-1 opacity-80">Use the list or ↑ ↓ to choose</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="px-4 py-3 border-b bg-muted/20 text-sm font-semibold truncate shadow-sm" title={selected.path}>
+                                        {selected.name}
+                                    </div>
+                                    <div className="flex-1 flex items-center justify-center overflow-hidden">
+                                        <FilePreviewContent
+                                            path={selected.path}
+                                            extension={selectedExt}
+                                            name={selected.name}
+                                            is_dir={selected.is_dir}
+                                            section="explorer"
+                                        />
+                                    </div>
+                                    {/* Single-item delete button in preview footer */}
+                                    <div className="px-4 py-3 border-t bg-muted/10 flex items-center justify-between gap-3 shrink-0">
+                                        <span className="text-[10px] text-muted-foreground font-mono truncate opacity-60" title={selected.path}>
+                                            {selected.path}
+                                        </span>
+                                        <Button
+                                            variant="destructive"
+                                            size="sm"
+                                            className="h-7 text-xs shrink-0 gap-1.5"
+                                            onClick={() => handleDeleteSingle(selected)}
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                            Delete this
+                                        </Button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
                     </div>
 
                     <div className="px-6 py-4 border-t flex justify-between items-center shrink-0 bg-muted/5">
@@ -461,7 +433,7 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
                                     </div>
                                     {progress && (
                                         <span className="text-[10px] opacity-70 mt-1">
-                                            {progress.processed}/{progress.total}
+                                            {progress.processed}/{progress.total} · {progress.current}
                                         </span>
                                     )}
                                 </div>

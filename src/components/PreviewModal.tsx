@@ -3,7 +3,22 @@ import { usePreviewStore } from "@/stores/previewStore";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
 import { useMoveQueueStore } from "@/stores/moveQueueStore";
-import { FileText, Image as ImageIcon, Video, Music, FileQuestion, ChevronLeft, ChevronRight, FolderOpen, Maximize2, Minimize2, ListPlus, ListMinus, FolderInput, RotateCw } from "lucide-react";
+import {
+    FileText,
+    Image as ImageIcon,
+    Video,
+    Music,
+    FileQuestion,
+    ChevronLeft,
+    ChevronRight,
+    FolderOpen,
+    Maximize2,
+    Minimize2,
+    ListPlus,
+    ListMinus,
+    FolderInput,
+    RotateCw,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -17,68 +32,99 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { isVideoExtension } from "@/lib/fileTypes";
-
 import { FilePreviewContent } from "./FilePreviewContent";
 
-export const PreviewModal = () => {
-    const target = usePreviewStore((state) => state.target);
-    const isOpen = usePreviewStore((state) => state.isOpen);
-    const closePreview = usePreviewStore((state) => state.closePreview);
-    const openPreview = usePreviewStore((state) => state.openPreview);
-    const rotation = usePreviewStore((state) => state.rotation);
-    const setRotation = usePreviewStore((state) => state.setRotation);
-    const resetRotation = usePreviewStore((state) => state.resetRotation);
+// ─── Component ──────────────────────────────────────────────────────────────
 
-    const activeTabId = useExplorerStore((state) => state.activeTabId);
-    const tabs = useExplorerStore((state) => state.tabs);
-    const deleteQueue = useDeleteQueueStore((state) => state.queue);
-    const addToDeleteQueue = useDeleteQueueStore((state) => state.addToQueue);
-    const removeFromDeleteQueue = useDeleteQueueStore((state) => state.removeFromQueue);
-    const moveQueues = useMoveQueueStore((state) => state.queues);
-    const addToMoveQueue = useMoveQueueStore((state) => state.addToQueue);
-    const removeFromMoveQueue = useMoveQueueStore((state) => state.removeFromQueue);
-    const findQueuesContainingPath = useMoveQueueStore((state) => state.findQueuesContainingPath);
+
+function findAdjacentFile(
+    entries: any[],
+    fromIndex: number,
+    direction: 1 | -1
+): number {
+    const len = entries.length;
+    let i = (fromIndex + direction + len) % len;
+    let steps = 0;
+    while (steps < len) {
+        if (!entries[i].is_dir) return i;
+        i = (i + direction + len) % len;
+        steps++;
+    }
+    return -1;
+}
+
+// ─── Component ──────────────────────────────────────────────────────────────
+
+export const PreviewModal = () => {
+    const target = usePreviewStore((s) => s.target);
+    const isOpen = usePreviewStore((s) => s.isOpen);
+    const closePreview = usePreviewStore((s) => s.closePreview);
+    const openPreview = usePreviewStore((s) => s.openPreview);
+    const rotation = usePreviewStore((s) => s.rotation);
+    const setRotation = usePreviewStore((s) => s.setRotation);
+    const resetRotation = usePreviewStore((s) => s.resetRotation);
+
+    const activeTabId = useExplorerStore((s) => s.activeTabId);
+    const tabs = useExplorerStore((s) => s.tabs);
+
+    const deleteQueue = useDeleteQueueStore((s) => s.queue);
+    const addToDeleteQueue = useDeleteQueueStore((s) => s.addToQueue);
+    const removeFromDeleteQueue = useDeleteQueueStore((s) => s.removeFromQueue);
+
+    const moveQueues = useMoveQueueStore((s) => s.queues);
+    const addToMoveQueue = useMoveQueueStore((s) => s.addToQueue);
+    const removeFromMoveQueue = useMoveQueueStore((s) => s.removeFromQueue);
+    const findQueuesContainingPath = useMoveQueueStore((s) => s.findQueuesContainingPath);
 
     const [selectedMoveQueueId, setSelectedMoveQueueId] = useState<string>("");
+    const [isTheatrical, setIsTheatrical] = useState(false);
 
-    const isInDeleteQueue = target && deleteQueue.some((e) => e.path === target.path);
+    // ── Derived state ──────────────────────────────────────────────────────
+
+    const activeTab = tabs.find((t) => t.id === activeTabId);
+    const currentEntries = activeTab?.type === "explorer" ? activeTab.entries : [];
+
+    const isInDeleteQueue = target ? deleteQueue.some((e) => e.path === target.path) : false;
     const moveQueueIdsContainingTarget = target ? findQueuesContainingPath(target.path) : [];
     const isInMoveQueue = moveQueueIdsContainingTarget.length > 0;
 
-    // Get entries from the active tab to navigate
-    const activeTab = tabs.find(t => t.id === activeTabId);
-    const currentEntries = activeTab?.type === "explorer" ? activeTab.entries : [];
+    const ext = (target?.extension ?? "").toLowerCase();
+    const isRotatable = [
+        "jpg", "jpeg", "png", "webp", "svg",
+        ...[] /* video extensions handled by isVideoExtension below */
+    ].includes(ext) || isVideoExtension(ext);
+    const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext);
+    const isVideo = isVideoExtension(ext);
+    const isAudio = ["mp3", "wav", "ogg", "flac", "aac", "m4a"].includes(ext);
+    const isText = ["txt", "md", "js", "ts", "tsx", "jsx", "json", "rs", "css", "html", "py", "sh", "yml", "yaml", "toml"].includes(ext);
+    const isPdf = ext === "pdf";
 
-    const [isTheatrical, setIsTheatrical] = useState(false);
+    // ── Effects ────────────────────────────────────────────────────────────
 
-    // Reset theatrical mode when closed
+    // Reset theatrical mode on close
     useEffect(() => {
         if (!isOpen) setIsTheatrical(false);
     }, [isOpen]);
 
-    // Keep selected move queue valid
+    // Keep selected move queue valid when queues change
     useEffect(() => {
-        if (moveQueues.length === 0) setSelectedMoveQueueId("");
-        else if (!selectedMoveQueueId || !moveQueues.some((q) => q.id === selectedMoveQueueId))
+        if (moveQueues.length === 0) {
+            setSelectedMoveQueueId("");
+        } else if (!selectedMoveQueueId || !moveQueues.some((q) => q.id === selectedMoveQueueId)) {
             setSelectedMoveQueueId(moveQueues[0].id);
+        }
     }, [moveQueues, selectedMoveQueueId]);
+
+    // ── Navigation ─────────────────────────────────────────────────────────
 
     const handleNext = useCallback(() => {
         if (!target || !currentEntries.length) return;
         const index = currentEntries.findIndex((e: any) => e.path === target.path);
         if (index === -1) return;
-
-        const nextIndex = (index + 1) % currentEntries.length;
-        let i = nextIndex;
-        let loops = 0;
-        while (currentEntries[i].is_dir && loops < currentEntries.length) {
-            i = (i + 1) % currentEntries.length;
-            loops++;
-        }
-
-        if (!currentEntries[i].is_dir) {
+        const nextIndex = findAdjacentFile(currentEntries, index, 1);
+        if (nextIndex !== -1) {
             resetRotation();
-            openPreview({ ...currentEntries[i], path: currentEntries[i].canonical_path });
+            openPreview({ ...currentEntries[nextIndex], path: currentEntries[nextIndex].canonical_path });
         }
     }, [target, currentEntries, openPreview, resetRotation]);
 
@@ -86,143 +132,177 @@ export const PreviewModal = () => {
         if (!target || !currentEntries.length) return;
         const index = currentEntries.findIndex((e: any) => e.path === target.path);
         if (index === -1) return;
-
-        let prevIndex = (index - 1 + currentEntries.length) % currentEntries.length;
-        let i = prevIndex;
-        let loops = 0;
-        while (currentEntries[i].is_dir && loops < currentEntries.length) {
-            i = (i - 1 + currentEntries.length) % currentEntries.length;
-            loops++;
-        }
-
-        if (!currentEntries[i].is_dir) {
+        const prevIndex = findAdjacentFile(currentEntries, index, -1);
+        if (prevIndex !== -1) {
             resetRotation();
-            openPreview({ ...currentEntries[i], path: currentEntries[i].canonical_path });
+            openPreview({ ...currentEntries[prevIndex], path: currentEntries[prevIndex].canonical_path });
         }
     }, [target, currentEntries, openPreview, resetRotation]);
 
-    const handleAddToDeleteQueue = useCallback(() => {
+    // ── Actions ────────────────────────────────────────────────────────────
+
+    const handleToggleDeleteQueue = useCallback(() => {
         if (!target) return;
-        addToDeleteQueue({ ...target, path: target.path, canonical_path: target.canonical_path || target.path });
-        toast.success("Added to delete queue");
-    }, [target, addToDeleteQueue]);
-
-    const handleRemoveFromDeleteQueue = useCallback(() => {
-        if (!target) return;
-        removeFromDeleteQueue(target.path);
-        toast.success("Removed from delete queue");
-    }, [target, removeFromDeleteQueue]);
-
-    const handleAddToMoveQueue = useCallback(() => {
-        if (!target || !selectedMoveQueueId) return;
-        addToMoveQueue(selectedMoveQueueId, { ...target, path: target.path, canonical_path: target.canonical_path || target.path });
-        toast.success("Added to move queue");
-    }, [target, selectedMoveQueueId, addToMoveQueue]);
-
-    const handleRemoveFromMoveQueue = useCallback(() => {
-        if (!target) return;
-        moveQueueIdsContainingTarget.forEach((queueId) => removeFromMoveQueue(queueId, target.path));
-        toast.success("Removed from move queue(s)");
-    }, [target, moveQueueIdsContainingTarget, removeFromMoveQueue]);
-
-    const handleShowInFinder = () => {
-        if (target) {
-            invoke("show_in_finder", { path: target.path });
+        if (isInDeleteQueue) {
+            removeFromDeleteQueue(target.path);
+            toast.info("Removed from delete queue");
+        } else {
+            addToDeleteQueue({ ...target, canonical_path: target.canonical_path || target.path });
+            toast.success("Added to delete queue");
         }
-    };
+    }, [target, isInDeleteQueue, addToDeleteQueue, removeFromDeleteQueue]);
 
-    const handleOpenWithApp = useCallback(() => {
-        if (target) {
-            invoke("open_item", { path: target.path });
+    const handleToggleMoveQueue = useCallback(() => {
+        if (!target) return;
+        if (isInMoveQueue) {
+            moveQueueIdsContainingTarget.forEach((queueId) => removeFromMoveQueue(queueId, target.path));
+            toast.info("Removed from move queue");
+        } else {
+            if (!selectedMoveQueueId) {
+                toast.error("Select a move queue first");
+                return;
+            }
+            addToMoveQueue(selectedMoveQueueId, { ...target, canonical_path: target.canonical_path || target.path });
+            toast.success("Added to move queue");
         }
+    }, [target, isInMoveQueue, selectedMoveQueueId, addToMoveQueue, moveQueueIdsContainingTarget, removeFromMoveQueue]);
+
+    const handleShowInFinder = useCallback(() => {
+        if (target) invoke("show_in_finder", { path: target.path });
     }, [target]);
 
-    const ext = target?.extension?.toLowerCase() || "";
-    const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext);
-    const isVideo = isVideoExtension(ext);
-    const isAudio = ["mp3", "wav", "ogg", "flac"].includes(ext);
-    const isText = ["txt", "md", "js", "ts", "json", "rs", "css", "html", "py", "sh", "yml", "yaml"].includes(ext);
-    const isPdf = ext === "pdf";
+    const handleOpenWithApp = useCallback(() => {
+        if (target) invoke("open_item", { path: target.path });
+    }, [target]);
+
+    // ── Keyboard navigation ────────────────────────────────────────────────
 
     useEffect(() => {
         if (!isOpen) return;
 
-        const handleKeyDown = (e: KeyboardEvent) => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            const noMod = !e.metaKey && !e.ctrlKey && !e.altKey;
+
             if (e.key === "ArrowRight") {
                 handleNext();
             } else if (e.key === "ArrowLeft") {
                 handlePrev();
             } else if (e.key === "Delete" || ((e.metaKey || e.ctrlKey) && e.key === "Backspace")) {
                 e.preventDefault();
-                handleAddToDeleteQueue();
+                handleToggleDeleteQueue();
             } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "o") {
                 e.preventDefault();
                 handleOpenWithApp();
-            } else if (e.key === "f" || e.key === "F") {
-                // Toggle theatrical mode with 'f'
-                if (!e.metaKey && !e.ctrlKey && !e.altKey) {
-                    setIsTheatrical(prev => !prev);
-                }
-            } else if (e.key === "Escape") {
-                if (isTheatrical) {
-                    setIsTheatrical(false);
-                }
+            } else if ((e.key === "f" || e.key === "F") && noMod) {
+                setIsTheatrical((prev) => !prev);
+            } else if (e.key === "Escape" && isTheatrical) {
+                setIsTheatrical(false);
+            } else if ((e.key === "r" || e.key === "R") && noMod && isRotatable) {
+                setRotation((rotation + 90) % 360);
             }
         };
 
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [isOpen, handleNext, handlePrev, handleAddToDeleteQueue, isTheatrical, handleOpenWithApp]);
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [isOpen, isTheatrical, isRotatable, rotation, handleNext, handlePrev, handleToggleDeleteQueue, handleOpenWithApp, setRotation]);
+
+    // ── Render guard ───────────────────────────────────────────────────────
 
     if (!target) return null;
+
+    const currentIndex = currentEntries.findIndex((e: any) => e.path === target.path);
+    const fileCount = currentEntries.filter((e: any) => !e.is_dir).length;
+
+    // ── File type icon ─────────────────────────────────────────────────────
+
+    const FileTypeIcon = () => {
+        if (isImage) return <ImageIcon className="w-3.5 h-3.5 text-blue-400" />;
+        if (isVideo) return <Video className="w-3.5 h-3.5 text-violet-400" />;
+        if (isAudio) return <Music className="w-3.5 h-3.5 text-pink-400" />;
+        if (isText) return <FileText className="w-3.5 h-3.5 text-amber-400" />;
+        if (isPdf) return <FileText className="w-3.5 h-3.5 text-red-400" />;
+        return <FileQuestion className="w-3.5 h-3.5 text-muted-foreground" />;
+    };
 
     return (
         <Dialog open={isOpen} onOpenChange={closePreview}>
             <DialogContent
                 className={cn(
-                    "flex flex-col p-0 overflow-hidden bg-background/95 backdrop-blur-sm outline-none transition-all duration-500 ease-in-out",
+                    "flex flex-col p-0 overflow-hidden outline-none",
+                    "transition-[width,height,max-width,margin,border-radius] duration-300 ease-in-out",
                     isTheatrical
-                        ? "w-screen h-screen max-w-none m-0 rounded-none border-0"
-                        : "sm:max-w-[900px] h-[80vh] border-border/50"
+                        ? "w-screen h-screen max-w-none m-0 rounded-none border-0 bg-black"
+                        : "sm:max-w-[900px] h-[82vh] border-border/50 bg-background/95 backdrop-blur-sm rounded-xl"
                 )}
             >
-                <DialogHeader className={cn(
-                    "p-4 flex flex-row items-center justify-between space-y-0 z-50 transition-colors",
-                    isTheatrical ? "bg-black/80 text-white border-b-0 absolute top-0 left-0 right-0 hover:opacity-100 opacity-0 transition-opacity duration-300" : "bg-muted/30 border-b"
-                )}>
-                    <DialogTitle className="flex items-center gap-2 truncate pr-8 text-sm font-semibold">
-                        {isImage && <ImageIcon className="w-4 h-4 text-blue-500" />}
-                        {isVideo && <Video className="w-4 h-4 text-purple-500" />}
-                        {isAudio && <Music className="w-4 h-4 text-pink-500" />}
-                        {isText && <FileText className="w-4 h-4 text-orange-500" />}
-                        {isPdf && <FileText className="w-4 h-4 text-red-500" />}
-                        {(!isImage && !isVideo && !isAudio && !isText && !isPdf) && <FileQuestion className="w-4 h-4 text-muted-foreground" />}
-                        {target.name}
+                {/* ── Header ─────────────────────────────────────────────── */}
+                <DialogHeader
+                    className={cn(
+                        "shrink-0 px-4 py-3 flex flex-row items-center justify-between space-y-0 z-50",
+                        isTheatrical
+                            ? "absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent opacity-0 hover:opacity-100 transition-opacity duration-200 border-b-0"
+                            : "bg-muted/20 border-b"
+                    )}
+                >
+                    <DialogTitle className="flex items-center gap-2 min-w-0 pr-4">
+                        {/* File type badge */}
+                        <div className={cn(
+                            "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider shrink-0",
+                            isTheatrical ? "bg-white/10 text-white" : "bg-muted text-muted-foreground"
+                        )}>
+                            <FileTypeIcon />
+                            <span>{ext || "file"}</span>
+                        </div>
+                        {/* File name */}
+                        <span className={cn(
+                            "text-sm font-semibold truncate",
+                            isTheatrical && "text-white"
+                        )}>
+                            {target.name}
+                        </span>
+                        {/* Position indicator */}
+                        {currentIndex >= 0 && fileCount > 1 && (
+                            <span className="text-[10px] text-muted-foreground shrink-0 ml-1">
+                                {currentIndex + 1} / {fileCount}
+                            </span>
+                        )}
                     </DialogTitle>
 
-                    <div className="flex items-center gap-2 mr-8 relative z-[60]">
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className={cn("h-8 w-8", isTheatrical && "text-white hover:bg-white/20")}
-                            onClick={() => setRotation((rotation + 90) % 360)}
-                            title="Rotate 90°"
-                        >
-                            <RotateCw className="w-4 h-4" />
-                        </Button>
+                    <div className={cn(
+                        "flex items-center gap-1 shrink-0 mr-8",
+                        isTheatrical && "text-white"
+                    )}>
+                        {/* Rotate — only shown for rotatable types */}
+                        {isRotatable && (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className={cn("h-8 w-8", isTheatrical && "text-white hover:bg-white/20")}
+                                onClick={() => setRotation((rotation + 90) % 360)}
+                                title="Rotate 90° (R)"
+                            >
+                                <RotateCw className="w-4 h-4" />
+                            </Button>
+                        )}
+
+                        {/* Theater mode toggle */}
                         <Button
                             variant="ghost"
                             size="icon"
                             className={cn("h-8 w-8", isTheatrical && "text-white hover:bg-white/20")}
                             onClick={() => setIsTheatrical(!isTheatrical)}
-                            title={isTheatrical ? "Exit Theater Mode" : "Enter Theater Mode"}
+                            title={isTheatrical ? "Exit Theater Mode (F)" : "Theater Mode (F)"}
                         >
                             {isTheatrical ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                         </Button>
                     </div>
                 </DialogHeader>
 
-                <div className="flex-1 overflow-auto relative group flex items-center justify-center bg-black/5 dark:bg-white/5 p-4 data-[theatrical=true]:bg-black data-[theatrical=true]:p-0" data-theatrical={isTheatrical}>
+                {/* ── Preview area ────────────────────────────────────────── */}
+                <div className={cn(
+                    "flex-1 min-h-0 flex items-center justify-center overflow-hidden",
+                    isTheatrical ? "bg-black" : "bg-black/5 dark:bg-white/5"
+                )}>
                     <FilePreviewContent
                         path={target.path}
                         extension={target.extension || ""}
@@ -231,93 +311,137 @@ export const PreviewModal = () => {
                     />
                 </div>
 
-                <div className="p-3 border-t bg-muted/30 flex justify-between items-center px-6">
-                    <div className="flex items-center gap-6">
-                        <div className="flex flex-col">
-                            <span className="text-[10px] uppercase text-muted-foreground font-bold tracking-wider">Size</span>
-                            <span className="text-xs font-medium">{formatSize(target.size)}</span>
+                {/* ── Footer ──────────────────────────────────────────────── */}
+                <div className={cn(
+                    "shrink-0 px-5 py-3 border-t flex items-center justify-between gap-4",
+                    isTheatrical
+                        ? "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent border-t-0 opacity-0 hover:opacity-100 transition-opacity duration-200"
+                        : "bg-muted/20"
+                )}>
+                    {/* Left: metadata */}
+                    <div className="flex items-center gap-5 text-xs shrink-0">
+                        <div className="flex flex-col gap-0.5">
+                            <span className="text-[9px] uppercase font-black tracking-widest text-muted-foreground">Size</span>
+                            <span className="font-semibold tabular-nums">{formatSize(target.size)}</span>
                         </div>
-                        <div className="flex flex-col border-l pl-6">
-                            <span className="text-[10px] uppercase text-muted-foreground font-bold tracking-wider">Type</span>
-                            <span className="text-xs font-medium uppercase">{ext || "Unknown"}</span>
-                        </div>
+                        {target.modified && (
+                            <div className="flex flex-col gap-0.5 border-l pl-5">
+                                <span className="text-[9px] uppercase font-black tracking-widest text-muted-foreground">Modified</span>
+                                <span className="font-semibold">{formatDate(target.modified)}</span>
+                            </div>
+                        )}
                     </div>
-                    <div className="flex items-center gap-2">
-                        <Button variant="outline" size="icon" className="h-8 w-8" onClick={handlePrev}>
-                            <ChevronLeft className="h-4 w-4" />
-                        </Button>
-                        <Button variant="outline" size="icon" className="h-8 w-8" onClick={handleNext}>
-                            <ChevronRight className="h-4 w-4" />
-                        </Button>
-                        <Button variant="secondary" size="sm" className="ml-2 font-medium" onClick={handleOpenWithApp}>
-                            Open with App
-                        </Button>
+
+                    {/* Right: actions */}
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                        {/* Navigation */}
+                        <div className="flex items-center rounded-lg border overflow-hidden">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-none border-r"
+                                onClick={handlePrev}
+                                disabled={currentEntries.length < 2}
+                                title="Previous (←)"
+                            >
+                                <ChevronLeft className="h-4 w-4" />
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-none"
+                                onClick={handleNext}
+                                disabled={currentEntries.length < 2}
+                                title="Next (→)"
+                            >
+                                <ChevronRight className="h-4 w-4" />
+                            </Button>
+                        </div>
+
+                        {/* Separator */}
+                        <div className="w-px h-6 bg-border" />
+
+                        {/* Open / Reveal */}
                         <Button
                             variant="secondary"
+                            size="sm"
+                            className="h-8 text-xs font-semibold"
+                            onClick={handleOpenWithApp}
+                            title="Open with default app (⌘O)"
+                        >
+                            Open
+                        </Button>
+                        <Button
+                            variant="ghost"
                             size="icon"
-                            className="h-8 w-8 ml-2"
+                            className="h-8 w-8"
                             onClick={handleShowInFinder}
                             title="Show in Finder"
                         >
                             <FolderOpen className="h-4 w-4" />
                         </Button>
+
+                        {/* Separator */}
+                        <div className="w-px h-6 bg-border" />
+
+                        {/* Delete queue toggle — single button, state-driven */}
                         <Button
                             variant="outline"
-                            size="icon"
-                            className="h-8 w-8 ml-2 text-destructive hover:text-destructive hover:bg-destructive/10"
-                            onClick={handleAddToDeleteQueue}
-                            title="Add to delete queue"
+                            size="sm"
+                            className={cn(
+                                "h-8 gap-1.5 text-xs font-semibold transition-colors",
+                                isInDeleteQueue
+                                    ? "border-destructive/50 text-destructive bg-destructive/5 hover:bg-destructive/10"
+                                    : "hover:border-destructive/40 hover:text-destructive"
+                            )}
+                            onClick={handleToggleDeleteQueue}
+                            title={isInDeleteQueue ? "Remove from delete queue (Del)" : "Add to delete queue (Del)"}
                         >
-                            <ListPlus className="h-4 w-4" />
+                            {isInDeleteQueue ? <ListMinus className="h-3.5 w-3.5" /> : <ListPlus className="h-3.5 w-3.5" />}
+                            {isInDeleteQueue ? "Queued" : "Delete"}
                         </Button>
-                        {isInDeleteQueue && (
-                            <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8 ml-2 text-destructive hover:bg-destructive/10"
-                                onClick={handleRemoveFromDeleteQueue}
-                                title="Remove from delete queue"
-                            >
-                                <ListMinus className="h-4 w-4" />
-                            </Button>
-                        )}
+
+                        {/* Move queue — shown only if queues exist */}
                         {moveQueues.length > 0 && (
-                            <>
-                                <Select value={selectedMoveQueueId} onValueChange={setSelectedMoveQueueId}>
-                                    <SelectTrigger className="h-8 min-w-[120px] text-xs" title="Move queue">
-                                        <SelectValue placeholder="Queue" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {moveQueues.map((q) => (
-                                            <SelectItem key={q.id} value={q.id}>
-                                                {q.name} ({q.items.length})
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                            <div className="flex items-center gap-1.5">
+                                {/* Queue selector — hidden when already in a queue */}
+                                {!isInMoveQueue && (
+                                    <Select
+                                        value={selectedMoveQueueId}
+                                        onValueChange={setSelectedMoveQueueId}
+                                    >
+                                        <SelectTrigger className="h-8 min-w-[110px] text-xs">
+                                            <SelectValue placeholder="Queue" />
+                                        </SelectTrigger>
+                                        <SelectContent side="top">
+                                            {moveQueues.map((q) => (
+                                                <SelectItem key={q.id} value={q.id}>
+                                                    {q.name} ({q.items.length})
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                                {/* Move toggle button */}
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    className="h-8 gap-1 text-primary"
-                                    onClick={handleAddToMoveQueue}
-                                    disabled={!selectedMoveQueueId}
-                                    title="Add to move queue"
+                                    className={cn(
+                                        "h-8 gap-1.5 text-xs font-semibold transition-colors",
+                                        isInMoveQueue
+                                            ? "border-primary/50 text-primary bg-primary/5 hover:bg-primary/10"
+                                            : "hover:border-primary/40 hover:text-primary"
+                                    )}
+                                    onClick={handleToggleMoveQueue}
+                                    disabled={!isInMoveQueue && !selectedMoveQueueId}
+                                    title={isInMoveQueue ? "Remove from move queue" : "Add to move queue"}
                                 >
-                                    <FolderInput className="h-4 w-4" />
-                                    Add to move
+                                    {isInMoveQueue
+                                        ? <><ListMinus className="h-3.5 w-3.5" /> In Queue</>
+                                        : <><FolderInput className="h-3.5 w-3.5" /> Move</>
+                                    }
                                 </Button>
-                            </>
-                        )}
-                        {isInMoveQueue && (
-                            <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8 text-primary hover:bg-primary/10"
-                                onClick={handleRemoveFromMoveQueue}
-                                title="Remove from move queue"
-                            >
-                                <ListMinus className="h-4 w-4" />
-                            </Button>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -326,14 +450,24 @@ export const PreviewModal = () => {
     );
 };
 
-function formatSize(bytes: number | null): string {
-    if (bytes === null) return "Unknown";
+// ─── Utils ───────────────────────────────────────────────────────────────────
+
+function formatSize(bytes: number | null | undefined): string {
+    if (bytes == null) return "Unknown";
     const units = ["B", "KB", "MB", "GB", "TB"];
     let size = bytes;
-    let unitIndex = 0;
-    while (size >= 1024 && unitIndex < units.length - 1) {
-        size /= 1024;
-        unitIndex++;
+    let i = 0;
+    while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+    return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function formatDate(ts: number | string | null | undefined): string {
+    if (ts == null) return "";
+    try {
+        return new Date(typeof ts === "number" ? ts * 1000 : ts).toLocaleDateString(undefined, {
+            month: "short", day: "numeric", year: "numeric",
+        });
+    } catch {
+        return "";
     }
-    return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
