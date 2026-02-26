@@ -6,6 +6,7 @@ import { useMoveQueueStore } from "@/stores/moveQueueStore";
 import type { FileEntry } from "@/types/explorer";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
     FolderInput,
@@ -89,6 +90,8 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
         toast.success("Destination updated");
     };
 
+    const [moveProgress, setMoveProgress] = useState<{ processed: number; total: number } | null>(null);
+
     const handleMoveAll = async (queueId: string) => {
         const queue = useMoveQueueStore.getState().getQueue(queueId);
         if (!queue || queue.items.length === 0) return;
@@ -97,8 +100,19 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
             return;
         }
         setMovingQueueId(queueId);
+        const operationId = crypto.randomUUID();
+
+        const unlisten = listen("batch_progress", (event: any) => {
+            const data = event.payload;
+            if (data.operation_id === operationId) {
+                setMoveProgress({
+                    processed: data.processed_items,
+                    total: data.total_items
+                });
+            }
+        });
+
         try {
-            const operationId = crypto.randomUUID();
             await invoke("batch_move", {
                 operationId,
                 sources: queue.items.map((e) => e.path),
@@ -113,6 +127,8 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
             toast.error(`Move failed: ${e}`);
         } finally {
             setMovingQueueId(null);
+            setMoveProgress(null);
+            unlisten.then(u => u());
         }
     };
 
@@ -251,7 +267,14 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
                                                             onClick={!q.folderPath ? undefined : () => handleMoveAll(q.id)}
                                                         >
                                                             {movingQueueId === q.id ? (
-                                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                                <div className="flex items-center gap-1.5 min-w-[60px] justify-center">
+                                                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                                                    {moveProgress && (
+                                                                        <span className="text-[9px] tabular-nums font-bold">
+                                                                            {moveProgress.processed}/{moveProgress.total}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
                                                             ) : (
                                                                 "Move all"
                                                             )}

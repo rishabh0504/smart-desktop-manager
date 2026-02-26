@@ -6,6 +6,7 @@ import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { FileEntry } from "@/types/explorer";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Trash2, FileText, FileQuestion, Folder, Loader2, X, ChevronUp, ChevronDown, ArrowRightLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -208,23 +209,43 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
         return () => window.removeEventListener("keydown", onKey);
     }, [open, queue.length, selectPrev, selectNext]);
 
+    const [progress, setProgress] = useState<{ processed: number; total: number; current: string } | null>(null);
+
     const confirmDelete = useCallback(async () => {
         if (queue.length === 0) return;
         setDeleting(true);
+        const operationId = crypto.randomUUID();
+
+        const unlisten = listen("batch_progress", (event: any) => {
+            const data = event.payload;
+            if (data.operation_id === operationId) {
+                setProgress({
+                    processed: data.processed_items,
+                    total: data.total_items,
+                    current: data.current_item
+                });
+            }
+        });
+
         try {
-            const operationId = crypto.randomUUID();
             await invoke("delete_items", { operationId, paths: queue.map((e) => e.path) });
             clearQueue();
             onOpenChange(false);
             setConfirmOpen(false);
+
+            // Refresh only relevant explorer tabs (ideally those showing paths we deleted or their parents)
+            // For now, refreshing all explorer tabs is safer but we do it once.
             tabs.forEach((tab) => {
                 if (tab.type === "explorer") refresh(tab.id);
             });
+
             toast.success(`${queue.length} item(s) deleted`);
         } catch (e) {
             toast.error(`Delete failed: ${e}`);
         } finally {
             setDeleting(false);
+            setProgress(null);
+            unlisten.then(u => u());
         }
     }, [queue, clearQueue, onOpenChange, tabs, refresh]);
 
@@ -433,10 +454,17 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
                         </Button>
                         <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
                             {deleting ? (
-                                <>
-                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                    Deleting...
-                                </>
+                                <div className="flex flex-col items-center">
+                                    <div className="flex items-center">
+                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                        <span>Deleting...</span>
+                                    </div>
+                                    {progress && (
+                                        <span className="text-[10px] opacity-70 mt-1">
+                                            {progress.processed}/{progress.total}
+                                        </span>
+                                    )}
+                                </div>
                             ) : (
                                 "Delete"
                             )}

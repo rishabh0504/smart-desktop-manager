@@ -48,11 +48,14 @@ pub async fn delete_items(
 ) -> Result<(), String> {
     let total_items = paths.len();
     let cancel_flag = register_operation(operation_id.clone());
+    let processed_count = std::sync::atomic::AtomicUsize::new(0);
+    let last_emit = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
 
     let op_id = operation_id.clone();
     let app_clone = app.clone();
+    
     let res = tokio::task::spawn_blocking(move || {
-        paths.par_iter().enumerate().try_for_each(|(index, path)| {
+        paths.par_iter().try_for_each(|path| {
             if cancel_flag.load(Ordering::Relaxed) {
                 return Err("Operation cancelled".to_string());
             }
@@ -60,17 +63,39 @@ pub async fn delete_items(
             let p = PathBuf::from(path);
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
             
-            let _ = app_clone.emit("batch_progress", BatchProgress {
-                operation_id: op_id.clone(),
-                current_item: name,
-                processed_items: index,
-                total_items,
-                progress: (index as f64 / total_items as f64) * 100.0,
-            });
+            let count = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
+            
+            // Throttle progress events to once every 100ms or for the last item
+            let mut last_emit_lock = last_emit.lock().unwrap();
+            if last_emit_lock.elapsed().as_millis() > 100 || count == total_items {
+                let _ = app_clone.emit("batch_progress", BatchProgress {
+                    operation_id: op_id.clone(),
+                    current_item: name,
+                    processed_items: count,
+                    total_items,
+                    progress: (count as f64 / total_items as f64) * 100.0,
+                });
+                *last_emit_lock = std::time::Instant::now();
+            }
+            drop(last_emit_lock);
 
             if p.exists() {
                 if p.is_dir() {
-                    let _ = std::fs::remove_dir_all(&p);
+                    #[cfg(target_os = "macos")]
+                    {
+                        // On macOS, rm -rf is often much faster for deep trees than recursive std::fs removal
+                        let status = std::process::Command::new("rm")
+                            .arg("-rf")
+                            .arg(&p)
+                            .status();
+                        if status.is_err() || !status.unwrap().success() {
+                            let _ = std::fs::remove_dir_all(&p);
+                        }
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        let _ = std::fs::remove_dir_all(&p);
+                    }
                 } else {
                     let _ = std::fs::remove_file(&p);
                 }
@@ -97,10 +122,13 @@ pub async fn batch_copy(
     let cancel_flag = register_operation(operation_id.clone());
     let dest_path = PathBuf::from(&destination_dir);
 
+    let processed_count = std::sync::atomic::AtomicUsize::new(0);
+    let last_emit = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+
     let op_id = operation_id.clone();
     let app_clone = app.clone();
     let res = tokio::task::spawn_blocking(move || {
-        sources.par_iter().enumerate().try_for_each(|(index, src)| {
+        sources.par_iter().try_for_each(|src| {
             if cancel_flag.load(Ordering::Relaxed) {
                 return Err("Operation cancelled".to_string());
             }
@@ -109,13 +137,21 @@ pub async fn batch_copy(
             let file_name = src_path.file_name().unwrap_or_default();
             let target_path = unique_dest_path(&dest_path, file_name);
 
-            let _ = app_clone.emit("batch_progress", BatchProgress {
-                operation_id: op_id.clone(),
-                current_item: file_name.to_string_lossy().into_owned(),
-                processed_items: index,
-                total_items,
-                progress: (index as f64 / total_items as f64) * 100.0,
-            });
+            let count = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
+            
+            // Throttle progress events to once every 100ms or for the last item
+            let mut last_emit_lock = last_emit.lock().unwrap();
+            if last_emit_lock.elapsed().as_millis() > 100 || count == total_items {
+                let _ = app_clone.emit("batch_progress", BatchProgress {
+                    operation_id: op_id.clone(),
+                    current_item: file_name.to_string_lossy().into_owned(),
+                    processed_items: count,
+                    total_items,
+                    progress: (count as f64 / total_items as f64) * 100.0,
+                });
+                *last_emit_lock = std::time::Instant::now();
+            }
+            drop(last_emit_lock);
 
             if src_path.is_dir() {
                 let mut opts = fs_extra::dir::CopyOptions::new();
@@ -148,10 +184,13 @@ pub async fn batch_move(
     let cancel_flag = register_operation(operation_id.clone());
     let dest_path = PathBuf::from(&destination_dir);
 
+    let processed_count = std::sync::atomic::AtomicUsize::new(0);
+    let last_emit = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+
     let op_id = operation_id.clone();
     let app_clone = app.clone();
     let res = tokio::task::spawn_blocking(move || {
-        sources.par_iter().enumerate().try_for_each(|(index, src)| {
+        sources.par_iter().try_for_each(|src| {
             if cancel_flag.load(Ordering::Relaxed) {
                 return Err("Operation cancelled".to_string());
             }
@@ -160,13 +199,21 @@ pub async fn batch_move(
             let file_name = src_path.file_name().unwrap_or_default();
             let target_path = unique_dest_path(&dest_path, file_name);
 
-            let _ = app_clone.emit("batch_progress", BatchProgress {
-                operation_id: op_id.clone(),
-                current_item: file_name.to_string_lossy().into_owned(),
-                processed_items: index,
-                total_items,
-                progress: (index as f64 / total_items as f64) * 100.0,
-            });
+            let count = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
+            
+            // Throttle progress events to once every 100ms or for the last item
+            let mut last_emit_lock = last_emit.lock().unwrap();
+            if last_emit_lock.elapsed().as_millis() > 100 || count == total_items {
+                let _ = app_clone.emit("batch_progress", BatchProgress {
+                    operation_id: op_id.clone(),
+                    current_item: file_name.to_string_lossy().into_owned(),
+                    processed_items: count,
+                    total_items,
+                    progress: (count as f64 / total_items as f64) * 100.0,
+                });
+                *last_emit_lock = std::time::Instant::now();
+            }
+            drop(last_emit_lock);
 
             if src_path.is_dir() {
                 // Attempt atomic rename first
