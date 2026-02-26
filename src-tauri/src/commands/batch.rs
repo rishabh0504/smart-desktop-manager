@@ -169,15 +169,27 @@ pub async fn batch_move(
             });
 
             if src_path.is_dir() {
-                let mut opts = fs_extra::dir::CopyOptions::new();
-                opts.overwrite = false;
-                if fs_extra::dir::copy(&src_path, &target_path, &opts).is_ok() {
-                    let _ = std::fs::remove_dir_all(&src_path);
+                // Attempt atomic rename first
+                if std::fs::rename(&src_path, &target_path).is_err() {
+                    let mut opts = fs_extra::dir::CopyOptions::new();
+                    opts.overwrite = false;
+                    if fs_extra::dir::copy(&src_path, &target_path, &opts).is_ok() {
+                        let _ = std::fs::remove_dir_all(&src_path);
+                    } else {
+                        eprintln!("Failed to copy directory: {:?}", src_path);
+                        return Err(format!("Failed to move directory: {:?}", src_path));
+                    }
                 }
             } else {
-                let mut opts = fs_extra::file::CopyOptions::new();
-                opts.overwrite = false;
-                let _ = fs_extra::file::move_file(&src_path, &target_path, &opts);
+                // Attempt atomic rename first
+                if std::fs::rename(&src_path, &target_path).is_err() {
+                    let mut opts = fs_extra::file::CopyOptions::new();
+                    opts.overwrite = false;
+                    if let Err(e) = fs_extra::file::move_file(&src_path, &target_path, &opts) {
+                        eprintln!("Failed to move file {:?}: {:?}", src_path, e);
+                        return Err(format!("Failed to move file {:?}: {:?}", src_path, e));
+                    }
+                }
             }
             Ok(())
         })

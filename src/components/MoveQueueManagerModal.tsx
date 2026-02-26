@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { useMoveQueueStore } from "@/stores/moveQueueStore";
 import type { FileEntry } from "@/types/explorer";
@@ -15,7 +16,7 @@ import {
     FileIcon,
     ChevronRight,
     ChevronDown,
-    FileQuestion,
+    RotateCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -27,6 +28,8 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { FilePreviewContent } from "./FilePreviewContent";
+import { usePreviewStore } from "@/stores/previewStore";
 import { isVideoExtension } from "@/lib/fileTypes";
 
 interface MoveQueueManagerModalProps {
@@ -35,19 +38,6 @@ interface MoveQueueManagerModalProps {
 }
 
 type SelectedFile = { queueId: string; path: string };
-
-function VideoPreviewMuted({ src, className }: { src: string; className?: string }) {
-    const videoRef = useRef<HTMLVideoElement>(null);
-    useEffect(() => {
-        const el = videoRef.current;
-        if (!el) return;
-        el.muted = true;
-        const onPlay = () => { el.muted = true; };
-        el.addEventListener("play", onPlay);
-        return () => el.removeEventListener("play", onPlay);
-    }, [src]);
-    return <video ref={videoRef} controls src={src} className={className} muted playsInline />;
-}
 
 export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueManagerModalProps) => {
     const { queues, updateQueue, removeQueue, clearQueue, moveItemToQueue } = useMoveQueueStore();
@@ -58,9 +48,7 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
     const [expandedQueues, setExpandedQueues] = useState<Set<string>>(new Set());
     const [selectedFile, setSelectedFile] = useState<SelectedFile | null>(null);
     const [moveToQueueId, setMoveToQueueId] = useState<string>("");
-    const [previewContent, setPreviewContent] = useState<string | null>(null);
-    const [previewLoading, setPreviewLoading] = useState(false);
-    const [previewError, setPreviewError] = useState<string | null>(null);
+    const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
 
     const toggleQueueExpanded = (queueId: string) => {
         setExpandedQueues((prev) => {
@@ -85,39 +73,6 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
         [queues, selectedFile]
     );
 
-    useEffect(() => {
-        if (!selectedEntry || !isOpen) {
-            setPreviewContent(null);
-            setPreviewError(null);
-            return;
-        }
-        const ext = (selectedEntry.extension ?? "").toLowerCase();
-        const isText = ["txt", "md", "js", "ts", "json", "rs", "css", "html", "py", "sh", "yml", "yaml"].includes(ext);
-        const isPdf = ext === "pdf";
-        const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext);
-        const isVideo = isVideoExtension(ext);
-        const isAudio = ["mp3", "wav", "ogg", "flac"].includes(ext);
-
-        setPreviewLoading(true);
-        setPreviewError(null);
-        if (isText) {
-            invoke<string>("get_file_text_content", { path: selectedEntry.path })
-                .then((c) => { setPreviewContent(c); setPreviewError(null); })
-                .catch((e) => { setPreviewError(String(e)); setPreviewContent(null); })
-                .finally(() => setPreviewLoading(false));
-        } else if (isPdf) {
-            invoke<string>("get_file_base64_content", { path: selectedEntry.path })
-                .then((c) => { setPreviewContent(c); setPreviewError(null); })
-                .catch((e) => { setPreviewError(String(e)); setPreviewContent(null); })
-                .finally(() => setPreviewLoading(false));
-        } else if (isImage || isVideo || isAudio) {
-            setPreviewContent(`vmedia://localhost/${encodeURIComponent(selectedEntry.path)}`);
-            setPreviewLoading(false);
-        } else {
-            setPreviewLoading(false);
-        }
-    }, [selectedEntry?.path, isOpen]);
-
     const handleRenameQueue = (queueId: string, currentName: string) => {
         const name = window.prompt("Rename queue:", currentName);
         if (name?.trim()) {
@@ -137,6 +92,10 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
     const handleMoveAll = async (queueId: string) => {
         const queue = useMoveQueueStore.getState().getQueue(queueId);
         if (!queue || queue.items.length === 0) return;
+        if (!queue.folderPath) {
+            toast.error(`Destination folder is unset for queue "${queue.name}"`);
+            return;
+        }
         setMovingQueueId(queueId);
         try {
             const operationId = crypto.randomUUID();
@@ -160,9 +119,55 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
     const handleMoveItemToQueue = () => {
         if (!selectedFile || !moveToQueueId) return;
         moveItemToQueue(selectedFile.queueId, moveToQueueId, selectedFile.path);
-        toast.success("Item moved to other queue");
+        toast.success("Item moved successfully");
         setMoveToQueueId("");
         setSelectedFile(null);
+    };
+
+    const handleBulkMoveToQueue = () => {
+        if (bulkSelected.size === 0 || !moveToQueueId) return;
+        let count = 0;
+        bulkSelected.forEach((path) => {
+            const queueId = queues.find(q => q.items.some(i => i.path === path))?.id;
+            if (queueId) {
+                moveItemToQueue(queueId, moveToQueueId, path);
+                count++;
+            }
+        });
+        toast.success(`Moved ${count} items successfully`);
+        setBulkSelected(new Set());
+        setMoveToQueueId("");
+        setSelectedFile(null);
+    };
+
+    const handleRemoveItem = (queueId: string, path: string) => {
+        useMoveQueueStore.getState().removeFromQueue(queueId, path);
+        if (selectedFile?.path === path) setSelectedFile(null);
+        toast.success("Removed from queue");
+    };
+
+    const handleBulkRemove = () => {
+        if (bulkSelected.size === 0) return;
+        let count = 0;
+        bulkSelected.forEach((path) => {
+            const queueId = queues.find(q => q.items.some(i => i.path === path))?.id;
+            if (queueId) {
+                useMoveQueueStore.getState().removeFromQueue(queueId, path);
+                count++;
+            }
+        });
+        toast.success(`Removed ${count} items from queues`);
+        setBulkSelected(new Set());
+        setSelectedFile(null);
+    };
+
+    const toggleBulk = (path: string) => {
+        setBulkSelected(prev => {
+            const next = new Set(prev);
+            if (next.has(path)) next.delete(path);
+            else next.add(path);
+            return next;
+        });
     };
 
     return (
@@ -242,8 +247,8 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
                                                             variant="default"
                                                             size="sm"
                                                             className="h-7 text-xs"
-                                                            disabled={q.items.length === 0 || movingQueueId !== null}
-                                                            onClick={() => handleMoveAll(q.id)}
+                                                            disabled={q.items.length === 0 || movingQueueId !== null || !q.folderPath}
+                                                            onClick={!q.folderPath ? undefined : () => handleMoveAll(q.id)}
                                                         >
                                                             {movingQueueId === q.id ? (
                                                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -286,6 +291,12 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
                                                                             )}
                                                                             onClick={() => setSelectedFile({ queueId: q.id, path: item.path })}
                                                                         >
+                                                                            <Checkbox
+                                                                                checked={bulkSelected.has(item.path)}
+                                                                                onCheckedChange={() => toggleBulk(item.path)}
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                className="h-3.5 w-3.5 shrink-0"
+                                                                            />
                                                                             <FileIcon className="w-4 h-4 shrink-0 text-muted-foreground" />
                                                                             <span className="truncate min-w-0" title={item.path}>
                                                                                 {item.name}
@@ -304,124 +315,133 @@ export const MoveQueueManagerModal = ({ open: isOpen, onOpenChange }: MoveQueueM
                             </ScrollArea>
                         </div>
 
-                        {/* Right: preview + move to queue */}
-                        <div className="flex flex-col min-w-0 bg-muted/20">
-                            <div className="px-4 py-2 border-b text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                                Preview & move to queue
+                        <div className="flex flex-col min-w-0 bg-muted/10">
+                            <div className="px-4 py-2 border-b text-xs font-medium uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                                <span>Preview & Routing</span>
+                                {bulkSelected.size > 0 && <span className="font-bold text-primary">{bulkSelected.size} items selected</span>}
                             </div>
                             <ScrollArea className="flex-1">
-                                <div className="p-4 space-y-4">
-                                    {!selectedEntry ? (
-                                        <p className="text-sm text-muted-foreground">
-                                            Select a file from the tree on the left to see preview and move it to another queue.
-                                        </p>
+                                <div className="p-4 flex flex-col h-full gap-4">
+                                    {bulkSelected.size > 1 ? (
+                                        <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-background border rounded-lg shadow-sm">
+                                            <FolderInput className="w-16 h-16 text-primary mb-4" />
+                                            <h3 className="text-xl font-bold mb-2">Batch Actions</h3>
+                                            <p className="text-sm text-muted-foreground mb-8">
+                                                {bulkSelected.size} files selected across your move queues.
+                                            </p>
+
+                                            <div className="w-full max-w-sm space-y-4">
+                                                <div className="flex gap-2">
+                                                    <Select value={moveToQueueId || undefined} onValueChange={setMoveToQueueId}>
+                                                        <SelectTrigger className="flex-1">
+                                                            <SelectValue placeholder="Select target queue…" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {queues.map((oq) => (
+                                                                <SelectItem key={oq.id} value={oq.id}>
+                                                                    {oq.name} → {oq.folderPath || "(unset)"}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                    <Button disabled={!moveToQueueId} onClick={handleBulkMoveToQueue}>
+                                                        Move {bulkSelected.size} Items
+                                                    </Button>
+                                                </div>
+                                                <div className="relative">
+                                                    <div className="absolute inset-0 flex items-center">
+                                                        <span className="w-full border-t" />
+                                                    </div>
+                                                    <div className="relative flex justify-center text-xs uppercase">
+                                                        <span className="bg-background px-2 text-muted-foreground">Or</span>
+                                                    </div>
+                                                </div>
+                                                <Button variant="destructive" className="w-full" onClick={handleBulkRemove}>
+                                                    <Trash2 className="w-4 h-4 mr-2" />
+                                                    Dequeue {bulkSelected.size} Items
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ) : !selectedEntry ? (
+                                        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-background border rounded-lg text-muted-foreground text-center">
+                                            <p className="text-sm">Select a file from the tree on the left to see preview and move it to another queue.</p>
+                                        </div>
                                     ) : (
-                                        <>
-                                            <section>
+                                        <div className="flex-1 flex flex-col gap-4 min-h-0">
+                                            <section className="shrink-0 max-h-[400px] flex flex-col">
                                                 <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-2">
                                                     Content preview
                                                 </p>
-                                                <div className="rounded-lg border bg-background overflow-hidden min-h-[200px] flex items-center justify-center">
-                                                    {(() => {
-                                                        const ext = (selectedEntry.extension ?? "").toLowerCase();
-                                                        const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext);
-                                                        const isVideo = isVideoExtension(ext);
-                                                        const isAudio = ["mp3", "wav", "ogg", "flac"].includes(ext);
-                                                        const isText = ["txt", "md", "js", "ts", "json", "rs", "css", "html", "py", "sh", "yml", "yaml"].includes(ext);
-                                                        const isPdf = ext === "pdf";
-                                                        const mediaSrc = previewContent && (isImage || isVideo || isAudio) ? previewContent : null;
-                                                        if (previewLoading) {
-                                                            return (
-                                                                <div className="flex items-center gap-2 text-muted-foreground py-8">
-                                                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                                                    <span>Loading…</span>
-                                                                </div>
-                                                            );
-                                                        }
-                                                        if (previewError) {
-                                                            return <p className="text-sm text-muted-foreground p-4 text-center">{previewError}</p>;
-                                                        }
-                                                        if (isImage && mediaSrc) {
-                                                            return <img src={mediaSrc} alt={selectedEntry.name} className="max-w-full max-h-[320px] object-contain" />;
-                                                        }
-                                                        if (isVideo && mediaSrc) {
-                                                            return <VideoPreviewMuted src={mediaSrc} className="max-w-full max-h-[320px] object-contain rounded" />;
-                                                        }
-                                                        if (isAudio && mediaSrc) {
-                                                            return (
-                                                                <div className="p-6 w-full max-w-sm">
-                                                                    <audio controls src={mediaSrc} className="w-full" muted />
-                                                                </div>
-                                                            );
-                                                        }
-                                                        if (isText && previewContent) {
-                                                            return (
-                                                                <div className="w-full h-full max-h-[320px] p-4 font-mono text-xs bg-muted/20 overflow-auto whitespace-pre text-left">
-                                                                    {previewContent}
-                                                                </div>
-                                                            );
-                                                        }
-                                                        if (isPdf && previewContent) {
-                                                            return (
-                                                                <embed
-                                                                    src={previewContent}
-                                                                    type="application/pdf"
-                                                                    className="w-full min-h-[320px] rounded"
-                                                                />
-                                                            );
-                                                        }
-                                                        return (
-                                                            <div className="flex flex-col items-center gap-2 text-muted-foreground p-6">
-                                                                <FileQuestion className="w-12 h-12 opacity-50" />
-                                                                <p className="text-sm">No preview for this file type</p>
-                                                            </div>
-                                                        );
-                                                    })()}
+                                                <div className="flex-1 rounded-lg border bg-background overflow-hidden relative shadow-sm flex items-center justify-center min-h-[200px]">
+                                                    <FilePreviewContent
+                                                        path={selectedEntry.path}
+                                                        extension={selectedEntry.extension || ""}
+                                                        name={selectedEntry.name}
+                                                        section="explorer"
+                                                    />
                                                 </div>
                                             </section>
 
-                                            {selectedQueue && (
-                                                <section className="flex gap-4 text-xs">
-                                                    <div>
-                                                        <span className="text-muted-foreground">Queue</span>
-                                                        <p className="font-medium truncate" title={selectedQueue.name}>{selectedQueue.name}</p>
+                                            <section className="bg-background border rounded-lg p-4 shadow-sm space-y-4 shrink-0">
+                                                <div className="grid grid-cols-[1fr_auto] gap-4">
+                                                    <div className="flex flex-col min-w-0">
+                                                        <span className="text-[10px] uppercase font-bold text-muted-foreground mb-1">Metadata</span>
+                                                        <span className="text-xs font-mono font-bold truncate">{selectedEntry.name}</span>
+                                                        <span className="text-[10px] font-mono text-muted-foreground truncate opacity-80" title={selectedEntry.path}>{selectedEntry.path}</span>
+                                                        {selectedQueue && (
+                                                            <div className="mt-2 flex gap-4 text-[10px]">
+                                                                <div>
+                                                                    <span className="uppercase text-muted-foreground/70 font-semibold mr-1">Origin Queue:</span>
+                                                                    <span className="font-bold">{selectedQueue.name}</span>
+                                                                </div>
+                                                                <div className="truncate flex-1">
+                                                                    <span className="uppercase text-muted-foreground/70 font-semibold mr-1">Target:</span>
+                                                                    <span className="truncate" title={selectedQueue.folderPath}>{selectedQueue.folderPath || "(unset)"}</span>
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                    <div className="min-w-0 flex-1">
-                                                        <span className="text-muted-foreground">Destination</span>
-                                                        <p className="truncate text-muted-foreground" title={selectedQueue.folderPath}>{selectedQueue.folderPath}</p>
-                                                    </div>
-                                                </section>
-                                            )}
 
-                                            {otherQueuesForMove.length > 0 && (
-                                                <section>
-                                                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-2">
-                                                        Move to queue
-                                                    </p>
-                                                    <div className="flex flex-wrap items-center gap-2">
+                                                    <div className="flex flex-col gap-2 shrink-0 border-l pl-4 justify-center">
+                                                        {(selectedEntry.extension && (["jpg", "jpeg", "png", "webp", "gif", "svg"].includes(selectedEntry.extension.toLowerCase()) || isVideoExtension(selectedEntry.extension.toLowerCase()))) && (
+                                                            <Button variant="outline" size="sm" className="h-7 text-[10px] w-full" onClick={() => usePreviewStore.getState().setRotation(usePreviewStore.getState().rotation + 90)}>
+                                                                <RotateCw className="w-3 h-3 mr-1.5" /> Rotate
+                                                            </Button>
+                                                        )}
+                                                        <Button variant="outline" size="sm" className="h-7 text-[10px] w-full" onClick={() => invoke("show_in_finder", { path: selectedEntry.path })}>
+                                                            <FolderOpen className="w-3 h-3 mr-1.5" /> Reveal
+                                                        </Button>
+                                                        <Button variant="outline" size="sm" className="h-7 text-[10px] w-full" onClick={() => invoke("open_item", { path: selectedEntry.path })}>
+                                                            <FolderInput className="w-3 h-3 mr-1.5" /> Open OS
+                                                        </Button>
+                                                        <Button variant="outline" size="sm" className="h-7 text-[10px] w-full text-destructive hover:bg-destructive/10" onClick={() => handleRemoveItem(selectedQueue!.id, selectedEntry.path)}>
+                                                            <Trash2 className="w-3 h-3 mr-1.5" /> Dequeue
+                                                        </Button>
+                                                    </div>
+                                                </div>
+
+                                                {otherQueuesForMove.length > 0 && (
+                                                    <div className="flex items-center gap-2 pt-3 border-t">
+                                                        <span className="text-[10px] font-bold uppercase text-muted-foreground shrink-0 w-24">Route to</span>
                                                         <Select value={moveToQueueId || undefined} onValueChange={setMoveToQueueId}>
-                                                            <SelectTrigger className="min-w-[180px]">
+                                                            <SelectTrigger className="flex-1 h-8 text-xs">
                                                                 <SelectValue placeholder="Select queue…" />
                                                             </SelectTrigger>
                                                             <SelectContent>
                                                                 {otherQueuesForMove.map((oq) => (
                                                                     <SelectItem key={oq.id} value={oq.id}>
-                                                                        {oq.name} → {oq.folderPath}
+                                                                        {oq.name} ({oq.folderPath || "Unset"})
                                                                     </SelectItem>
                                                                 ))}
                                                             </SelectContent>
                                                         </Select>
-                                                        <Button
-                                                            size="sm"
-                                                            disabled={!moveToQueueId}
-                                                            onClick={handleMoveItemToQueue}
-                                                        >
-                                                            Move to selected queue
+                                                        <Button size="sm" className="h-8" disabled={!moveToQueueId} onClick={handleMoveItemToQueue}>
+                                                            Move File
                                                         </Button>
                                                     </div>
-                                                </section>
-                                            )}
-                                        </>
+                                                )}
+                                            </section>
+                                        </div>
                                     )}
                                 </div>
                             </ScrollArea>
