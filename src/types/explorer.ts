@@ -36,13 +36,14 @@ export interface PanelState {
 export interface Tab extends PanelState {
     id: string;
     title: string;
-    type: "explorer" | "duplicates" | "search" | "content_search" | "clean"; // extensible
+    type: "explorer" | "duplicates" | "search" | "content_search" | "clean" | "search_results"; // extensible
 }
 
 export interface SearchResult {
     path: string;
     name: string;
     is_dir: boolean;
+    size: number | null;
     line_number?: number;
     preview?: string;
 }

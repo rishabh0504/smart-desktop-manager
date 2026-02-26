@@ -1,4 +1,4 @@
-import { Music, FileQuestion, Loader2, FileText } from "lucide-react";
+import { Music, FileQuestion, Loader2, FileText, Folder } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ interface FilePreviewContentProps {
     path: string;
     extension: string;
     name: string;
+    is_dir?: boolean;
     className?: string;
     section: "explorer" | "dedupe" | "content_search";
 }
@@ -43,13 +44,12 @@ function VideoPreview({ src, className }: { src: string; className?: string }) {
             className={cn(className, "transition-transform duration-300")}
             style={{ transform: `rotate(${rotation}deg)` }}
             onVolumeChange={handleVolumeChange}
-            autoPlay
             playsInline
         />
     );
 }
 
-export const FilePreviewContent = ({ path, extension, name, className, section }: FilePreviewContentProps) => {
+export const FilePreviewContent = ({ path, extension, name, is_dir, className, section }: FilePreviewContentProps) => {
     const [content, setContent] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [previewError, setPreviewError] = useState<string | null>(null);
@@ -70,7 +70,7 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
     const isText = isTextExtension(ext) && previewSettings.text;
     const isDocument = isDocumentExtension(ext) && previewSettings.document;
 
-    const isPreviewEnabled = isImage || isVideo || isAudio || isText || isDocument;
+    const isPreviewEnabled = isImage || isVideo || isAudio || isText || isDocument || is_dir;
 
     useEffect(() => {
         if (!path) {
@@ -114,7 +114,7 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
         }
     }, [path, isText, isDocument, isImage, isVideo, isAudio, isPreviewEnabled, ext]);
 
-    if (!isPreviewEnabled) {
+    if (!isPreviewEnabled && !is_dir) {
         return (
             <div className={cn("flex flex-col items-center justify-center gap-4 text-muted-foreground bg-muted/20 p-8 rounded-xl border border-dashed", className)}>
                 <FileQuestion className="w-16 h-16 opacity-50" />
@@ -134,7 +134,32 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
                     <p className="text-sm font-medium text-muted-foreground">{previewError}</p>
                 </div>
             )}
-            {loading && !previewError && (
+            {is_dir && (
+                <div className="flex flex-col items-center justify-center gap-6 p-12 text-center animate-in fade-in duration-500">
+                    <div className="w-32 h-32 rounded-3xl bg-blue-500/10 flex items-center justify-center border-4 border-blue-500/20 shadow-inner group/folder">
+                        <Folder className="w-16 h-16 text-blue-500 fill-blue-500/20 group-hover/folder:scale-110 transition-transform duration-300" />
+                    </div>
+                    <div className="space-y-2">
+                        <h2 className="text-2xl font-black tracking-tighter text-foreground">{name}</h2>
+                        <div className="flex items-center justify-center gap-2">
+                            <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 text-[10px] font-bold uppercase tracking-widest border border-blue-500/20">Directory</span>
+                            <span className="text-[10px] text-muted-foreground font-mono opacity-60">{path}</span>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 w-full max-w-sm mt-4">
+                        <div className="p-3 rounded-xl bg-muted/20 border border-muted/30 flex flex-col gap-1 items-center">
+                            <span className="text-[10px] text-muted-foreground uppercase font-black">Type</span>
+                            <span className="text-xs font-bold text-foreground">Folder</span>
+                        </div>
+                        <div className="p-3 rounded-xl bg-muted/20 border border-muted/30 flex flex-col gap-1 items-center">
+                            <span className="text-[10px] text-muted-foreground uppercase font-black">Status</span>
+                            <span className="text-xs font-bold text-foreground">Scanned</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {loading && !previewError && !is_dir && (
                 <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm transition-all duration-300">
                     <div className="flex items-center gap-3 text-primary animate-pulse font-medium bg-background/80 px-4 py-2 rounded-full shadow-lg border">
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -153,7 +178,7 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
             )}
 
             {isVideo && content && !previewError && (
-                <VideoPreview src={content} className="w-full h-full object-contain shadow-2xl rounded-sm" />
+                <VideoPreview src={content} className="w-full h-auto aspect-video object-contain shadow-2xl rounded-sm" />
             )}
 
             {isAudio && !previewError && (
@@ -165,7 +190,6 @@ export const FilePreviewContent = ({ path, extension, name, className, section }
                         controls
                         src={content || undefined}
                         className="w-64 shadow-lg"
-                        autoPlay
                         ref={(el) => {
                             if (el) {
                                 el.volume = volume;

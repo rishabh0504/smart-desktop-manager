@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FilePanel } from "@/panels/FilePanel";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { SearchDialog } from "@/components/SearchDialog";
+import { SearchResultsPanel } from "@/components/SearchResultsPanel";
 import { Button } from "@/components/ui/button";
 import { Search, Sun, Moon, Settings, Keyboard, Menu, Plus, Trash2, FolderInput } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
@@ -227,6 +228,7 @@ export const MainLayout = () => {
                                             )}
                                         >
                                             {tab.type === "explorer" && <FilePanel tabId={tab.id} />}
+                                            {tab.type === "search_results" && <SearchResultsPanel tabId={tab.id} />}
                                         </div>
                                     ))
                                 ) : (

@@ -14,6 +14,7 @@ pub struct SearchResult {
     pub path: String,
     pub name: String,
     pub is_dir: bool,
+    pub size: Option<u64>,
     pub line_number: Option<u64>,
     pub preview: Option<String>,
 }
@@ -21,6 +22,10 @@ pub struct SearchResult {
 fn walk_builder(root: &str, max_depth: Option<u32>) -> ignore::Walk {
     let mut builder = ignore::WalkBuilder::new(root);
     builder.follow_links(false);
+    builder.hidden(false); // Show hidden files
+    builder.git_global(false);
+    builder.git_ignore(false);
+    builder.require_git(false);
     if let Some(d) = max_depth {
         builder.max_depth(Some(d as usize));
     }
@@ -35,10 +40,12 @@ pub async fn start_file_search(
     pattern: String,
     max_depth: Option<u32>,
     result_limit: Option<usize>,
+    item_type: Option<String>,
 ) -> Result<(), String> {
     let cancel_flag = register_operation(search_id.clone());
     let pattern = pattern.to_lowercase();
     let limit = result_limit.unwrap_or(DEFAULT_RESULT_LIMIT);
+    let filter_type = item_type.unwrap_or_else(|| "both".to_string());
 
     tokio::task::spawn_blocking(move || {
         let count = AtomicUsize::new(0);
@@ -51,9 +58,15 @@ pub async fn start_file_search(
                 Err(_) => continue,
             };
             let path = entry.path();
-            if path.is_dir() {
-                continue;
+            let is_dir = path.is_dir();
+
+            // Apply item_type filter
+            match filter_type.as_str() {
+                "file" if is_dir => continue,
+                "folder" if !is_dir => continue,
+                _ => {}
             }
+
             let name = match path.file_name().and_then(|n| n.to_str()) {
                 Some(n) => n,
                 None => continue,
@@ -68,7 +81,8 @@ pub async fn start_file_search(
                     SearchResult {
                         path: path.to_string_lossy().into_owned(),
                         name: name.to_string(),
-                        is_dir: false,
+                        is_dir,
+                        size: entry.metadata().ok().map(|m| m.len()),
                         line_number: None,
                         preview: None,
                     },
@@ -99,12 +113,14 @@ impl<'a> Sink for ContentSearchSink<'a> {
         }
         self.count.fetch_add(1, Ordering::Relaxed);
         let preview = String::from_utf8_lossy(mat.bytes()).trim().to_string();
+        let size = std::fs::metadata(&self.path).ok().map(|m| m.len());
         let _ = self.app.emit(
             "search_result",
             SearchResult {
                 path: self.path.clone(),
                 name: self.name.clone(),
                 is_dir: false,
+                size,
                 line_number: Some(mat.line_number().unwrap_or(0)),
                 preview: Some(preview),
             },
@@ -121,11 +137,13 @@ pub async fn start_content_search(
     pattern: String,
     max_depth: Option<u32>,
     result_limit: Option<usize>,
+    item_type: Option<String>,
 ) -> Result<(), String> {
     let cancel_flag = register_operation(search_id.clone());
     let matcher = RegexMatcher::new(&pattern).map_err(|e| e.to_string())?;
     let mut searcher = Searcher::new();
     let limit = result_limit.unwrap_or(DEFAULT_RESULT_LIMIT);
+    let filter_type = item_type.unwrap_or_else(|| "both".to_string());
 
     tokio::task::spawn_blocking(move || {
         let count = AtomicUsize::new(0);
@@ -137,9 +155,21 @@ pub async fn start_content_search(
                 Ok(e) => e,
                 Err(_) => continue,
             };
-            if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+
+            let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+
+            // Apply item_type filter
+            match filter_type.as_str() {
+                "file" if is_dir => continue,
+                "folder" if !is_dir => continue,
+                _ => {}
+            }
+
+            // Content search only makes sense for files
+            if is_dir {
                 continue;
             }
+
             let path = entry.path();
             let path_str = path.to_string_lossy().into_owned();
             let name = path

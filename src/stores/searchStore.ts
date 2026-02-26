@@ -12,8 +12,8 @@ interface SearchState {
     searchId: string | null;
     query: string;
 
-    startFileSearch: (root: string, query: string, options?: { max_depth?: number; result_limit?: number }) => Promise<void>;
-    startContentSearch: (root: string, query: string, options?: { max_depth?: number; result_limit?: number }) => Promise<void>;
+    startFileSearch: (root: string, query: string, options?: { max_depth?: number; result_limit?: number; item_type?: string }) => Promise<void>;
+    startContentSearch: (root: string, query: string, options?: { max_depth?: number; result_limit?: number; item_type?: string }) => Promise<void>;
     cancelSearch: () => Promise<void>;
     clearResults: () => void;
 }
@@ -68,6 +68,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
             pattern: query,
             max_depth: options?.max_depth ?? null,
             result_limit: options?.result_limit ?? null,
+            item_type: options?.item_type ?? "both",
         });
     },
 
@@ -113,6 +114,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
             pattern: query,
             max_depth: options?.max_depth ?? null,
             result_limit: options?.result_limit ?? null,
+            item_type: options?.item_type ?? "both",
         });
     },
 

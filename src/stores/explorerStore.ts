@@ -12,6 +12,7 @@ interface ExplorerStore {
     closeTab: (id: string) => void;
     setActiveTab: (id: string) => void;
     setActiveView: (view: "explorer" | "dedupe" | "content_search" | "clean") => void;
+    addSearchResultsTab: (results: any[], query: string) => void;
 
     // Per-Tab Actions (require tabId)
     setPath: (tabId: string, path: string, updateHistory?: boolean, force?: boolean) => Promise<void>;
@@ -119,7 +120,30 @@ export const useExplorerStore = create<ExplorerStore>((set, get) => ({
         }));
 
         // Initial load
-        setPath(newTab.id, path);
+        if (type === "explorer") {
+            setPath(newTab.id, path);
+        }
+    },
+
+    addSearchResultsTab: (results, query) => {
+        const { setActiveView } = get();
+        const newTab: Tab = {
+            id: crypto.randomUUID(),
+            title: `Search: ${query}`,
+            type: "search_results",
+            ...initialPanelState,
+            path: `search://${query}`,
+            entries: results,
+            total: results.length,
+            has_more: false
+        };
+
+        setActiveView("explorer");
+
+        set(state => ({
+            tabs: [...state.tabs, newTab],
+            activeTabId: newTab.id
+        }));
     },
 
     closeTab: (id) => {

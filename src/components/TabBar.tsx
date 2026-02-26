@@ -11,6 +11,7 @@ export const TabBar = () => {
             case "explorer": return <Folder className="w-3.5 h-3.5" />;
             case "duplicates": return <CopyCheck className="w-3.5 h-3.5 text-primary" />;
             case "search": return <Search className="w-3.5 h-3.5" />;
+            case "search_results": return <Search className="w-3.5 h-3.5 text-primary" />;
             default: return <File className="w-3.5 h-3.5" />;
         }
     };
