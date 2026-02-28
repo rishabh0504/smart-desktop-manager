@@ -14,6 +14,12 @@ export interface ProgressEvent {
     duplicates_found: number;
     current_path: string;
     status: string;
+    /** Accurate 0–100 overall percentage. */
+    percent: number;
+    /** 0=discovery, 1=partial hash, 2=full hash, 3=done */
+    phase: number;
+    /** Total candidate files in current phase (0 during early discovery). */
+    total_files: number;
     elapsed_ms: number;
 }
 

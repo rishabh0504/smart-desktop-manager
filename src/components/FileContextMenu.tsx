@@ -40,6 +40,17 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
     const setActiveView = useExplorerStore((state) => state.setActiveView);
     const currentTab = useExplorerStore((state) => state.tabs.find(t => t.id === tabId));
 
+    // Resolve which paths the action should apply to.
+    // If the right-clicked entry is in the active selection → bulk; otherwise just this entry.
+    const selection = currentTab?.selection ?? new Set<string>();
+    const isBulk = selection.size > 1 && selection.has(entry.path);
+    const targetPaths: string[] = isBulk
+        ? Array.from(selection)
+        : [entry.path];
+    const targetEntries: FileEntry[] = isBulk
+        ? (currentTab?.entries.filter(e => selection.has(e.path)) ?? [entry])
+        : [entry];
+
     const [isRenameOpen, setIsRenameOpen] = useState(false);
     const [renameInput, setRenameInput] = useState("");
     const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
@@ -63,13 +74,21 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
     };
 
     const handleAddToDeleteQueue = () => {
-        addToDeleteQueue(entry);
-        toast.success("Added to delete queue");
+        targetEntries.forEach(e => addToDeleteQueue(e));
+        toast.success(
+            targetEntries.length === 1
+                ? `"${entry.name}" added to delete queue`
+                : `${targetEntries.length} items added to delete queue`
+        );
     };
 
     const handleAddEntryToMoveQueue = (queueId: string) => {
-        addToMoveQueue(queueId, entry);
-        toast.success("Added to move queue");
+        targetEntries.forEach(e => addToMoveQueue(queueId, e));
+        toast.success(
+            targetEntries.length === 1
+                ? `"${entry.name}" added to move queue`
+                : `${targetEntries.length} items added to move queue`
+        );
     };
 
     const handleUseFolderAsDestination = (queueId?: string) => {
@@ -258,14 +277,22 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
                     )}
                     <ContextMenuSub>
                         <ContextMenuSubTrigger className="text-xs">
-                            <FolderInput className="w-3.5 h-3.5 mr-2" /> Add to move queue
+                            <FolderInput className="w-3.5 h-3.5 mr-2" />
+                            {isBulk ? `Move ${targetPaths.length} items to queue` : "Add to move queue"}
                         </ContextMenuSubTrigger>
                         <ContextMenuSubContent className="text-xs [&_button]:text-xs">
                             {queues.length === 0 ? (
-                                <ContextMenuItem disabled className="text-xs">No queues</ContextMenuItem>
+                                <ContextMenuItem disabled className="text-xs">No queues — create one by right-clicking a folder</ContextMenuItem>
                             ) : (
                                 queues.map((q) => (
-                                    <ContextMenuItem key={q.id} onClick={() => handleAddEntryToMoveQueue(q.id)} className="text-xs">{q.name} ({q.items.length})</ContextMenuItem>
+                                    <ContextMenuItem
+                                        key={q.id}
+                                        onClick={() => handleAddEntryToMoveQueue(q.id)}
+                                        className="text-xs"
+                                    >
+                                        {q.name}
+                                        <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">{q.items.length}</span>
+                                    </ContextMenuItem>
                                 ))
                             )}
                         </ContextMenuSubContent>
@@ -279,9 +306,12 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
                     <ContextMenuItem onClick={handleNewFolder} className="text-xs"><FolderPlus className="w-3.5 h-3.5 mr-2" /> New folder</ContextMenuItem>
                     <ContextMenuSeparator />
                     <ContextMenuItem onClick={handleAddToDeleteQueue} className="text-xs text-destructive hover:text-destructive">
-                        <Trash2 className="w-3.5 h-3.5 mr-2" /> Add to delete queue
+                        <Trash2 className="w-3.5 h-3.5 mr-2" />
+                        {isBulk ? `Add ${targetPaths.length} items to delete queue` : "Add to delete queue"}
                     </ContextMenuItem>
-                    <ContextMenuItem onClick={handleDelete} className="text-xs text-red-500 hover:text-red-600">Delete</ContextMenuItem>
+                    <ContextMenuItem onClick={handleDelete} className="text-xs text-red-500 hover:text-red-600">
+                        {isBulk ? `Delete ${targetPaths.length} items` : "Delete"}
+                    </ContextMenuItem>
 
                     <ContextMenuSeparator />
 

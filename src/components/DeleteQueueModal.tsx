@@ -1,5 +1,20 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
@@ -7,7 +22,20 @@ import { useExplorerStore } from "@/stores/explorerStore";
 import { FileEntry } from "@/types/explorer";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Trash2, FileText, FileQuestion, Folder, Loader2, X, ChevronUp, ChevronDown, ArrowRightLeft } from "lucide-react";
+import {
+    Trash2,
+    FileText,
+    FileQuestion,
+    Folder,
+    Loader2,
+    X,
+    ChevronUp,
+    ChevronDown,
+    ArrowRightLeft,
+    ListX,
+    FolderOpen,
+    Info,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -21,21 +49,69 @@ import {
 } from "@/components/ui/select";
 import { FilePreviewContent } from "./FilePreviewContent";
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const SELECTED_PATH_KEY = "deleteQueue_selectedPath";
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function readPersistedSelectedPath(): string | null {
+    try {
+        const raw = localStorage.getItem(SELECTED_PATH_KEY);
+        return raw ? (JSON.parse(raw) as string) : null;
+    } catch {
+        return null;
+    }
+}
+
+function persistSelectedPath(path: string | null): void {
+    try {
+        if (path) localStorage.setItem(SELECTED_PATH_KEY, JSON.stringify(path));
+        else localStorage.removeItem(SELECTED_PATH_KEY);
+    } catch {
+        // quota / private-browsing — safe to ignore
+    }
+}
+
+function formatBytes(bytes: number | null | undefined): string {
+    if (bytes == null || bytes < 0) return "";
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
+    return `${(bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1)} ${sizes[i]}`;
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
+
 interface DeleteQueueModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) => {
-    const { queue, removeFromQueue } = useDeleteQueueStore();
+    const { queue, removeFromQueue, validateQueue } = useDeleteQueueStore();
     const refresh = useExplorerStore((s) => s.refresh);
     const tabs = useExplorerStore((s) => s.tabs);
 
-    const [selected, setSelected] = useState<FileEntry | null>(null);
-    const [confirmOpen, setConfirmOpen] = useState(false);
+    // ── Selection — persisted to localStorage ─────────────────────────────
+    const [selected, setSelectedState] = useState<FileEntry | null>(null);
+
+    const setSelected = useCallback((entry: FileEntry | null) => {
+        setSelectedState(entry);
+        persistSelectedPath(entry?.path ?? null);
+    }, []);
+
+    // ── UI state ──────────────────────────────────────────────────────────
+    const [confirmAllOpen, setConfirmAllOpen] = useState(false);
+    const [confirmSingleOpen, setConfirmSingleOpen] = useState(false);
+    const [pendingSingleEntry, setPendingSingleEntry] = useState<FileEntry | null>(null);
     const [deleting, setDeleting] = useState(false);
     const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
     const [targetQueueId, setTargetQueueId] = useState<string>("");
+    const [progress, setProgress] = useState<{ processed: number; total: number; current: string } | null>(null);
 
     const moveQueues = useMoveQueueStore((s) => s.queues);
     const addManyToMoveQueue = useMoveQueueStore((s) => s.addManyToQueue);
@@ -43,188 +119,229 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
     const listRef = useRef<HTMLUListElement>(null);
     const deleteSuccessCount = useRef(0);
 
+    // ── Computed ──────────────────────────────────────────────────────────
+    const selectedIndex = useMemo(
+        () => (selected ? queue.findIndex((e) => e.path === selected.path) : -1),
+        [queue, selected]
+    );
+
+    const selectedExt = selected
+        ? (selected.extension ?? selected.name.split(".").pop() ?? "").toLowerCase()
+        : "";
+
+    // ── On open: validate stale paths ─────────────────────────────────────
     useEffect(() => {
         if (!open) {
-            setSelected(null);
-            setConfirmOpen(false);
+            setConfirmAllOpen(false);
+            setConfirmSingleOpen(false);
             setBulkSelected(new Set());
-        } else if (queue.length > 0) {
-            setSelected((prev) => (prev && queue.some((e) => e.path === prev.path) ? prev : queue[0]));
-        } else {
-            setSelected(null);
+            return;
         }
-    }, [open, queue.length]);
+        validateQueue();
+    }, [open, validateQueue]);
 
+    // ── Sync / restore selection when queue changes ───────────────────────
     useEffect(() => {
-        if (moveQueues.length > 0 && !targetQueueId) {
+        if (queue.length === 0) {
+            setSelected(null);
+            return;
+        }
+        setSelectedState((prev) => {
+            if (prev && queue.some((e) => e.path === prev.path)) return prev;
+            const savedPath = readPersistedSelectedPath();
+            const restored = savedPath ? queue.find((e) => e.path === savedPath) : null;
+            const next = restored ?? queue[0];
+            persistSelectedPath(next?.path ?? null);
+            return next ?? null;
+        });
+    }, [queue, setSelected]);
+
+    // ── Move-queue default ────────────────────────────────────────────────
+    useEffect(() => {
+        if (moveQueues.length > 0 && (!targetQueueId || !moveQueues.some((q) => q.id === targetQueueId))) {
             setTargetQueueId(moveQueues[0].id);
         }
     }, [moveQueues, targetQueueId]);
 
-    useEffect(() => {
-        if (selected && !queue.some((e) => e.path === selected.path)) {
-            const idx = queue.findIndex((e) => e.path === selected.path);
-            setSelected(queue[idx >= 0 ? idx : 0] ?? null);
-        }
-    }, [queue, selected]);
-
-    const selectedIndex = selected ? queue.findIndex((e) => e.path === selected.path) : -1;
+    // ── Keyboard navigation ───────────────────────────────────────────────
     const selectPrev = useCallback(() => {
         if (queue.length === 0) return;
         const idx = selectedIndex <= 0 ? queue.length - 1 : selectedIndex - 1;
         setSelected(queue[idx]);
         listRef.current?.querySelectorAll("li")[idx]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }, [queue, selectedIndex]);
+    }, [queue, selectedIndex, setSelected]);
+
     const selectNext = useCallback(() => {
         if (queue.length === 0) return;
         const idx = selectedIndex < 0 || selectedIndex >= queue.length - 1 ? 0 : selectedIndex + 1;
         setSelected(queue[idx]);
         listRef.current?.querySelectorAll("li")[idx]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }, [queue, selectedIndex]);
-
-    const handleDeleteAll = useCallback(async () => {
-        if (queue.length === 0) return;
-        setConfirmOpen(true);
-    }, [queue.length]);
+    }, [queue, selectedIndex, setSelected]);
 
     useEffect(() => {
         if (!open || queue.length === 0) return;
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === "ArrowUp") {
-                e.preventDefault();
-                selectPrev();
-            } else if (e.key === "ArrowDown") {
-                e.preventDefault();
-                selectNext();
-            }
+            if (e.key === "ArrowUp") { e.preventDefault(); selectPrev(); }
+            else if (e.key === "ArrowDown") { e.preventDefault(); selectNext(); }
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
     }, [open, queue.length, selectPrev, selectNext]);
 
-    const [progress, setProgress] = useState<{ processed: number; total: number; current: string } | null>(null);
+    // ── Shared tab refresh helper ─────────────────────────────────────────
+    const refreshAllTabs = useCallback(() => {
+        tabs.forEach((tab) => {
+            if (tab.type === "explorer" || tab.type === "search_results") refresh(tab.id);
+        });
+    }, [tabs, refresh]);
 
-    const confirmDelete = useCallback(async () => {
+    // ── Delete ALL ────────────────────────────────────────────────────────
+    const confirmDeleteAll = useCallback(async () => {
         if (queue.length === 0) return;
         setDeleting(true);
         const operationId = crypto.randomUUID();
         deleteSuccessCount.current = 0;
 
-        // Listen for real-time per-item success — remove from queue immediately as each item is deleted
-        const unlistenItemDone = await listen<{ operation_id: string; path: string }>("batch_item_completed", (event) => {
-            if (event.payload.operation_id === operationId) {
-                removeFromQueue(event.payload.path);
+        const unlistenItem = await listen<{ operation_id: string; path: string }>("batch_item_completed", (ev) => {
+            if (ev.payload.operation_id === operationId) {
+                removeFromQueue(ev.payload.path);
                 deleteSuccessCount.current++;
             }
         });
-
-        const unlistenProgress = await listen("batch_progress", (event: any) => {
-            const data = event.payload;
-            if (data.operation_id === operationId) {
-                setProgress({
-                    processed: data.processed_items,
-                    total: data.total_items,
-                    current: data.current_item
-                });
+        const unlistenProgress = await listen("batch_progress", (ev: any) => {
+            const d = ev.payload;
+            if (d.operation_id === operationId) {
+                setProgress({ processed: d.processed_items, total: d.total_items, current: d.current_item });
             }
         });
 
         try {
             await invoke("delete_items", { operationId, paths: queue.map((e) => e.path) });
-            // Any remaining queue items are failures — leave them in queue
             onOpenChange(false);
-            setConfirmOpen(false);
-
-            // Refresh both explorer and search_results tabs
-            tabs.forEach((tab) => {
-                if (tab.type === "explorer" || tab.type === "search_results") refresh(tab.id);
-            });
-
-            const count = deleteSuccessCount.current;
-            toast.success(`${count} item(s) deleted`);
+            setConfirmAllOpen(false);
+            refreshAllTabs();
+            toast.success(`${deleteSuccessCount.current} item(s) deleted`);
         } catch (e) {
-            const count = deleteSuccessCount.current;
-            if (count > 0) {
-                toast.warning(`Deleted ${count} item(s); some failed and remain in queue.`);
-            } else {
-                toast.error(`Delete failed: ${e}`);
-            }
-            // Refresh tabs for the ones that did succeed
-            tabs.forEach((tab) => {
-                if (tab.type === "explorer" || tab.type === "search_results") refresh(tab.id);
-            });
-            setConfirmOpen(false);
+            const c = deleteSuccessCount.current;
+            c > 0
+                ? toast.warning(`Deleted ${c} item(s); some failed and remain in queue.`)
+                : toast.error(`Delete failed: ${e}`);
+            refreshAllTabs();
+            setConfirmAllOpen(false);
         } finally {
             setDeleting(false);
             setProgress(null);
-            unlistenItemDone();
+            unlistenItem();
             unlistenProgress();
         }
-    }, [queue, removeFromQueue, onOpenChange, tabs, refresh]);
+    }, [queue, removeFromQueue, onOpenChange, refreshAllTabs]);
 
-    /** Delete a single item directly from the preview pane */
-    const handleDeleteSingle = useCallback(async (entry: FileEntry) => {
+    // ── Delete SINGLE (with confirm) ──────────────────────────────────────
+    const requestSingleDelete = useCallback((entry: FileEntry) => {
+        setPendingSingleEntry(entry);
+        setConfirmSingleOpen(true);
+    }, []);
+
+    const confirmDeleteSingle = useCallback(async () => {
+        if (!pendingSingleEntry) return;
+        const entry = pendingSingleEntry;
+        setConfirmSingleOpen(false);
+        setPendingSingleEntry(null);
+
+        // Auto-advance selection BEFORE deletion so the list doesn't flash empty
+        const idx = queue.findIndex((e) => e.path === entry.path);
+        const nextEntry = queue[idx + 1] ?? queue[idx - 1] ?? null;
+
         const operationId = crypto.randomUUID();
         try {
             await invoke("delete_items", { operationId, paths: [entry.path] });
             removeFromQueue(entry.path);
-            tabs.forEach((tab) => {
-                if (tab.type === "explorer" || tab.type === "search_results") refresh(tab.id);
-            });
-            toast.success(`Deleted ${entry.name}`);
+            setSelected(nextEntry);
+            refreshAllTabs();
+            toast.success(`Deleted "${entry.name}"`);
         } catch (e) {
-            toast.error(`Failed to delete ${entry.name}: ${e}`);
+            toast.error(`Failed to delete "${entry.name}": ${e}`);
         }
-    }, [removeFromQueue, tabs, refresh]);
+    }, [pendingSingleEntry, queue, removeFromQueue, setSelected, refreshAllTabs]);
 
-    const toggleBulk = (path: string) => {
-        setBulkSelected(prev => {
+    // ── Bulk helpers ──────────────────────────────────────────────────────
+    const toggleBulk = useCallback((path: string) => {
+        setBulkSelected((prev) => {
             const next = new Set(prev);
-            if (next.has(path)) next.delete(path);
-            else next.add(path);
+            next.has(path) ? next.delete(path) : next.add(path);
             return next;
         });
-    };
+    }, []);
 
-    const toggleAll = () => {
-        if (bulkSelected.size === queue.length) {
-            setBulkSelected(new Set());
-        } else {
-            setBulkSelected(new Set(queue.map(e => e.path)));
-        }
-    };
+    const toggleAll = useCallback(() => {
+        setBulkSelected((prev) =>
+            prev.size === queue.length ? new Set() : new Set(queue.map((e) => e.path))
+        );
+    }, [queue]);
 
-    const handleBulkMove = () => {
+    // Bulk move selected items to a move queue
+    const handleBulkMoveToMoveQueue = useCallback(() => {
         if (bulkSelected.size === 0 || !targetQueueId) return;
-        const itemsToMove = queue.filter(e => bulkSelected.has(e.path));
-        addManyToMoveQueue(targetQueueId, itemsToMove);
-        itemsToMove.forEach(e => removeFromQueue(e.path));
+        const items = queue.filter((e) => bulkSelected.has(e.path));
+        addManyToMoveQueue(targetQueueId, items);
+        items.forEach((e) => removeFromQueue(e.path));
         setBulkSelected(new Set());
-        toast.success(`Moved ${itemsToMove.length} items to queue`);
-    };
+        toast.success(`Moved ${items.length} item(s) to move queue`);
+    }, [bulkSelected, targetQueueId, queue, addManyToMoveQueue, removeFromQueue]);
 
-    // Derive extension for the selected entry to pass to FilePreviewContent
-    const selectedExt = selected ? (selected.extension ?? selected.name.split(".").pop() ?? "") : "";
+    // Bug fix #3: Bulk DEQUEUE (remove from delete queue entirely)
+    const handleBulkDequeue = useCallback(() => {
+        if (bulkSelected.size === 0) return;
+        const paths = Array.from(bulkSelected);
+        // Auto-advance selection if selected item is being dequeued
+        if (selected && bulkSelected.has(selected.path)) {
+            const remaining = queue.filter((e) => !bulkSelected.has(e.path));
+            setSelected(remaining[0] ?? null);
+        }
+        paths.forEach((p) => removeFromQueue(p));
+        setBulkSelected(new Set());
+        toast.success(`Removed ${paths.length} item(s) from queue`);
+    }, [bulkSelected, selected, queue, removeFromQueue, setSelected]);
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Render
+    // ─────────────────────────────────────────────────────────────────────────
     return (
         <>
+            {/* ── Main Modal ─────────────────────────────────────────────── */}
             <Dialog open={open} onOpenChange={onOpenChange}>
-                <DialogContent className="max-w-4xl h-[88vh] flex flex-col p-0 overflow-hidden rounded-xl shadow-2xl border-2">
-                    <DialogHeader className="px-6 py-4 border-b shrink-0 bg-gradient-to-r from-destructive/5 to-transparent">
-                        <DialogTitle className="flex items-center gap-3 text-lg">
-                            <div className="p-2 rounded-lg bg-destructive/10">
-                                <Trash2 className="w-5 h-5 text-destructive" />
+                <DialogContent className="max-w-[900px] w-[95vw] h-[88vh] flex flex-col p-0 overflow-hidden rounded-2xl shadow-2xl border border-border/60">
+
+                    {/* Header */}
+                    <DialogHeader className="px-5 py-3.5 border-b shrink-0 bg-gradient-to-r from-destructive/8 via-background to-background">
+                        <DialogTitle className="flex items-center gap-3">
+                            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-destructive/12 ring-1 ring-destructive/20 shrink-0">
+                                <Trash2 className="w-4 h-4 text-destructive" />
                             </div>
-                            <span>Delete queue</span>
-                            <span className="text-sm font-normal text-muted-foreground">
+                            <span className="font-semibold text-base">Delete queue</span>
+                            {/* Live count badge */}
+                            <span className={cn(
+                                "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums transition-colors",
+                                queue.length > 0
+                                    ? "bg-destructive/12 text-destructive"
+                                    : "bg-muted text-muted-foreground"
+                            )}>
                                 {queue.length} item{queue.length !== 1 ? "s" : ""}
                             </span>
+                            {bulkSelected.size > 0 && (
+                                <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-primary/12 text-primary animate-in fade-in">
+                                    {bulkSelected.size} selected
+                                </span>
+                            )}
                         </DialogTitle>
                     </DialogHeader>
 
+                    {/* Body */}
                     <div className="flex-1 flex min-h-0">
-                        {/* Left: file list */}
-                        <div className="w-80 shrink-0 flex flex-col border-r bg-muted/5">
+
+                        {/* ── Left: file list ──────────────────────────────── */}
+                        <div className="w-72 shrink-0 flex flex-col border-r bg-muted/5">
+                            {/* List toolbar */}
                             <div className="px-3 py-2 border-b flex items-center justify-between bg-muted/10">
                                 <div className="flex items-center gap-2">
                                     <Checkbox
@@ -233,103 +350,146 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
                                         className="h-3.5 w-3.5"
                                     />
                                     <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
-                                        Queued items
+                                        Queued files
                                     </span>
                                 </div>
-                                {queue.length > 0 && (
-                                    <div className="flex items-center gap-0.5">
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-7 w-7"
-                                            onClick={selectPrev}
-                                            title="Previous"
-                                        >
-                                            <ChevronUp className="w-4 h-4" />
+                                {queue.length > 1 && (
+                                    <div className="flex items-center rounded-md border overflow-hidden">
+                                        <Button variant="ghost" size="icon" className="h-6 w-7 rounded-none border-r" onClick={selectPrev} title="Previous (↑)">
+                                            <ChevronUp className="w-3.5 h-3.5" />
                                         </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-7 w-7"
-                                            onClick={selectNext}
-                                            title="Next"
-                                        >
-                                            <ChevronDown className="w-4 h-4" />
+                                        <Button variant="ghost" size="icon" className="h-6 w-7 rounded-none" onClick={selectNext} title="Next (↓)">
+                                            <ChevronDown className="w-3.5 h-3.5" />
                                         </Button>
                                     </div>
                                 )}
                             </div>
+
+                            {/* List body */}
                             <ScrollArea className="flex-1">
                                 {queue.length === 0 ? (
-                                    <div className="p-8 text-center text-sm text-muted-foreground">
-                                        <Folder className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                                        <p>Queue is empty</p>
-                                        <p className="text-xs mt-1">Add items from preview or context menu</p>
+                                    <div className="flex flex-col items-center justify-center py-16 px-6 text-center gap-3">
+                                        <div className="w-14 h-14 rounded-full bg-muted/30 flex items-center justify-center">
+                                            <FolderOpen className="w-7 h-7 text-muted-foreground/40" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium text-muted-foreground">Queue is empty</p>
+                                            <p className="text-xs text-muted-foreground/60 mt-0.5">Add items from preview or context menu</p>
+                                        </div>
                                     </div>
                                 ) : (
-                                    <ul ref={listRef} className="p-2 space-y-1">
-                                        {queue.map((entry, index) => (
-                                            <li
-                                                key={entry.path}
-                                                className={cn(
-                                                    "flex items-center gap-2 rounded-lg p-2 text-sm cursor-pointer group transition-colors",
-                                                    selected?.path === entry.path
-                                                        ? "bg-primary/15 ring-1 ring-primary/40 shadow-sm"
-                                                        : "hover:bg-muted/50"
-                                                )}
-                                                onClick={() => setSelected(entry)}
-                                            >
-                                                <Checkbox
-                                                    checked={bulkSelected.has(entry.path)}
-                                                    onCheckedChange={() => toggleBulk(entry.path)}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className="h-3.5 w-3.5"
-                                                />
-                                                {entry.is_dir ? (
-                                                    <Folder className="w-4 h-4 shrink-0 text-blue-500" />
-                                                ) : (
-                                                    <FileText className="w-4 h-4 shrink-0 text-muted-foreground" />
-                                                )}
-                                                <span className="truncate flex-1 min-w-0" title={entry.name}>
-                                                    {entry.name}
-                                                </span>
-                                                {queue.length > 1 && (
-                                                    <span className="text-[10px] text-muted-foreground/70 tabular-nums">
-                                                        {index + 1}/{queue.length}
-                                                    </span>
-                                                )}
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 text-destructive hover:bg-destructive/10"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        removeFromQueue(entry.path);
-                                                    }}
+                                    <ul ref={listRef} className="p-2 space-y-0.5">
+                                        {queue.map((entry, index) => {
+                                            const isSelected = selected?.path === entry.path;
+                                            const isBulked = bulkSelected.has(entry.path);
+                                            const ext = (entry.extension ?? entry.name.split(".").pop() ?? "").toUpperCase();
+                                            const sizeStr = formatBytes(entry.size);
+                                            return (
+                                                <li
+                                                    key={entry.path}
+                                                    className={cn(
+                                                        "group flex items-center gap-2 rounded-lg px-2 py-2 text-sm cursor-pointer transition-all duration-150",
+                                                        isSelected
+                                                            ? "bg-destructive/10 ring-1 ring-destructive/30 shadow-sm"
+                                                            : isBulked
+                                                                ? "bg-primary/8 ring-1 ring-primary/20"
+                                                                : "hover:bg-muted/50"
+                                                    )}
+                                                    onClick={() => setSelected(entry)}
                                                 >
-                                                    <X className="w-3.5 h-3.5" />
-                                                </Button>
-                                            </li>
-                                        ))}
+                                                    <Checkbox
+                                                        checked={isBulked}
+                                                        onCheckedChange={() => toggleBulk(entry.path)}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className="h-3.5 w-3.5 shrink-0"
+                                                    />
+                                                    {/* File type icon */}
+                                                    {entry.is_dir
+                                                        ? <Folder className="w-4 h-4 shrink-0 text-blue-400" />
+                                                        : <FileText className={cn("w-4 h-4 shrink-0", isSelected ? "text-destructive/70" : "text-muted-foreground")} />
+                                                    }
+                                                    {/* Name + meta */}
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="truncate text-[13px] font-medium leading-tight" title={entry.name}>
+                                                            {entry.name}
+                                                        </p>
+                                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                                            {ext && (
+                                                                <span className={cn(
+                                                                    "inline-block px-1 py-px rounded text-[9px] font-bold uppercase tracking-wide",
+                                                                    isSelected ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground"
+                                                                )}>
+                                                                    {ext}
+                                                                </span>
+                                                            )}
+                                                            {sizeStr && (
+                                                                <span className="text-[10px] text-muted-foreground/60 tabular-nums">
+                                                                    {sizeStr}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    {/* Position */}
+                                                    {queue.length > 1 && (
+                                                        <span className="text-[10px] text-muted-foreground/50 tabular-nums shrink-0">
+                                                            {index + 1}/{queue.length}
+                                                        </span>
+                                                    )}
+                                                    {/* Remove button */}
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 text-destructive hover:bg-destructive/10 transition-opacity"
+                                                        onClick={(e) => { e.stopPropagation(); removeFromQueue(entry.path); }}
+                                                        title="Remove from queue"
+                                                    >
+                                                        <X className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                </li>
+                                            );
+                                        })}
                                     </ul>
                                 )}
                             </ScrollArea>
                         </div>
 
-                        {/* Right: Preview using shared FilePreviewContent */}
-                        <div className="flex-1 flex flex-col min-w-0 border-l bg-gradient-to-b from-background to-muted/10">
+                        {/* ── Right: Preview pane ──────────────────────────── */}
+                        {/* Bug fix #1: was a fragment — now a proper flex column */}
+                        <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-gradient-to-b from-background to-muted/10">
                             {!selected ? (
-                                <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground text-sm bg-gradient-to-b from-muted/5 to-muted/15">
-                                    <FileQuestion className="w-14 h-14 mb-3 opacity-30" />
-                                    <p className="font-medium">Select an item to preview</p>
-                                    <p className="text-xs mt-1 opacity-80">Use the list or ↑ ↓ to choose</p>
+                                /* Empty state */
+                                <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground bg-gradient-to-b from-muted/5 to-muted/15 px-8">
+                                    <div className="w-16 h-16 rounded-full bg-muted/30 flex items-center justify-center">
+                                        <FileQuestion className="w-8 h-8 opacity-40" />
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="font-medium text-sm">Select a file to preview</p>
+                                        <p className="text-xs opacity-60 mt-0.5">Click an item or use ↑ ↓ to navigate</p>
+                                    </div>
+                                    {queue.length > 0 && (
+                                        <div className="flex items-center gap-1.5 mt-2 px-3 py-1.5 bg-muted/30 rounded-lg text-xs text-muted-foreground">
+                                            <Info className="w-3.5 h-3.5 shrink-0" />
+                                            <span>{queue.length} item{queue.length !== 1 ? "s" : ""} waiting</span>
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 <>
-                                    <div className="px-4 py-3 border-b bg-muted/20 text-sm font-semibold truncate shadow-sm" title={selected.path}>
-                                        {selected.name}
+                                    {/* Preview header */}
+                                    <div className="px-4 py-2.5 border-b bg-muted/15 shrink-0 flex items-center gap-2">
+                                        <FileText className="w-4 h-4 shrink-0 text-muted-foreground" />
+                                        <span className="text-sm font-semibold truncate flex-1 min-w-0" title={selected.path}>
+                                            {selected.name}
+                                        </span>
+                                        {selectedExt && (
+                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-muted text-muted-foreground shrink-0">
+                                                {selectedExt}
+                                            </span>
+                                        )}
                                     </div>
-                                    <div className="flex-1 flex items-center justify-center overflow-hidden">
+
+                                    {/* Preview content */}
+                                    <div className="flex-1 flex items-center justify-center overflow-hidden min-h-0">
                                         <FilePreviewContent
                                             path={selected.path}
                                             extension={selectedExt}
@@ -338,16 +498,29 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
                                             section="explorer"
                                         />
                                     </div>
-                                    {/* Single-item delete button in preview footer */}
-                                    <div className="px-4 py-3 border-t bg-muted/10 flex items-center justify-between gap-3 shrink-0">
-                                        <span className="text-[10px] text-muted-foreground font-mono truncate opacity-60" title={selected.path}>
-                                            {selected.path}
-                                        </span>
+
+                                    {/* Preview footer */}
+                                    <div className="px-4 py-3 border-t bg-muted/10 flex items-center gap-3 shrink-0">
+                                        <div className="flex-1 min-w-0">
+                                            <p
+                                                className="text-[10px] font-mono text-muted-foreground truncate opacity-50"
+                                                title={selected.path}
+                                            >
+                                                {selected.path}
+                                            </p>
+                                            {selected.size != null && (
+                                                <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                                                    {formatBytes(selected.size)}
+                                                </p>
+                                            )}
+                                        </div>
+                                        {/* Bug fix #2: single-item delete now prompts for confirmation */}
                                         <Button
                                             variant="destructive"
                                             size="sm"
-                                            className="h-7 text-xs shrink-0 gap-1.5"
-                                            onClick={() => handleDeleteSingle(selected)}
+                                            className="h-7 text-xs shrink-0 gap-1.5 font-semibold"
+                                            onClick={() => requestSingleDelete(selected)}
+                                            title="Permanently delete this file"
                                         >
                                             <Trash2 className="w-3.5 h-3.5" />
                                             Delete this
@@ -358,92 +531,147 @@ export const DeleteQueueModal = ({ open, onOpenChange }: DeleteQueueModalProps) 
                         </div>
                     </div>
 
-                    <div className="px-6 py-4 border-t flex justify-between items-center shrink-0 bg-muted/5">
-                        <div className="flex items-center gap-4">
+                    {/* ── Footer action bar ─────────────────────────────────── */}
+                    <div className="px-5 py-3 border-t shrink-0 bg-muted/5 flex items-center justify-between gap-3">
+                        {/* Left: bulk actions — animated in */}
+                        <div className="flex items-center gap-2 flex-wrap min-h-[32px]">
                             {bulkSelected.size > 0 && (
-                                <div className="flex items-center gap-2 p-1 pl-3 bg-muted/20 border rounded-lg animate-in fade-in slide-in-from-bottom-2">
-                                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                                        {bulkSelected.size} selected
-                                    </span>
-                                    <div className="flex items-center gap-1 ml-2">
-                                        <ArrowRightLeft className="w-3.5 h-3.5 text-muted-foreground mr-1" />
-                                        <Select value={targetQueueId} onValueChange={setTargetQueueId}>
-                                            <SelectTrigger className="h-7 text-xs w-[140px] bg-background">
-                                                <SelectValue placeholder="Target Queue" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {moveQueues.map(q => (
-                                                    <SelectItem key={q.id} value={q.id}>
-                                                        {q.name}
-                                                    </SelectItem>
-                                                ))}
-                                                {moveQueues.length === 0 && (
-                                                    <SelectItem value="none" disabled>No queues found</SelectItem>
-                                                )}
-                                            </SelectContent>
-                                        </Select>
-                                        <Button
-                                            variant="secondary"
-                                            size="sm"
-                                            className="h-7 text-[10px] font-bold"
-                                            onClick={handleBulkMove}
-                                            disabled={!targetQueueId || targetQueueId === "none"}
-                                        >
-                                            MOVE TO QUEUE
-                                        </Button>
-                                    </div>
+                                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                                    {/* Bug fix #3: Bulk Dequeue button */}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 gap-1.5 text-xs font-semibold border-destructive/40 text-destructive hover:bg-destructive/10"
+                                        onClick={handleBulkDequeue}
+                                        title="Remove selected items from queue (without deleting)"
+                                    >
+                                        <ListX className="w-3.5 h-3.5" />
+                                        Dequeue {bulkSelected.size}
+                                    </Button>
+
+                                    {/* Divider */}
+                                    {moveQueues.length > 0 && <div className="w-px h-5 bg-border" />}
+
+                                    {/* Move to move-queue */}
+                                    {moveQueues.length > 0 && (
+                                        <>
+                                            <ArrowRightLeft className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                                            <Select value={targetQueueId} onValueChange={setTargetQueueId}>
+                                                <SelectTrigger className="h-8 text-xs w-[150px] bg-background">
+                                                    <SelectValue placeholder="Move queue" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {moveQueues.map((q) => (
+                                                        <SelectItem key={q.id} value={q.id}>{q.name}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                className="h-8 text-xs font-semibold"
+                                                onClick={handleBulkMoveToMoveQueue}
+                                                disabled={!targetQueueId}
+                                            >
+                                                → Move queue
+                                            </Button>
+                                        </>
+                                    )}
                                 </div>
                             )}
                         </div>
+
+                        {/* Right: Delete all */}
                         <Button
                             variant="destructive"
                             size="sm"
-                            className="font-semibold shadow-md"
+                            className="h-8 font-semibold shadow-sm gap-1.5 shrink-0"
                             disabled={queue.length === 0}
-                            onClick={handleDeleteAll}
+                            onClick={() => setConfirmAllOpen(true)}
                         >
-                            <Trash2 className="w-4 h-4 mr-2" />
+                            <Trash2 className="w-3.5 h-3.5" />
                             Delete all ({queue.length})
                         </Button>
                     </div>
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-                <DialogContent className="sm:max-w-md rounded-xl">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
+            {/* ── Confirm Delete ALL ─────────────────────────────────────── */}
+            {/* Bug fix #5: count derived live from queue.length, not a snapshot */}
+            <AlertDialog open={confirmAllOpen} onOpenChange={setConfirmAllOpen}>
+                <AlertDialogContent className="rounded-2xl max-w-sm">
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="flex items-center gap-2">
                             <Trash2 className="w-4 h-4 text-destructive" />
-                            Confirm delete
-                        </DialogTitle>
-                    </DialogHeader>
-                    <p className="text-sm text-muted-foreground">
-                        Permanently delete {queue.length} item(s)? This cannot be undone.
-                    </p>
-                    <div className="flex justify-end gap-2 pt-4">
-                        <Button variant="outline" onClick={() => setConfirmOpen(false)}>
-                            Cancel
-                        </Button>
-                        <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
-                            {deleting ? (
-                                <div className="flex flex-col items-center">
-                                    <div className="flex items-center">
-                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                        <span>Deleting...</span>
-                                    </div>
-                                    {progress && (
-                                        <span className="text-[10px] opacity-70 mt-1">
-                                            {progress.processed}/{progress.total} · {progress.current}
-                                        </span>
-                                    )}
-                                </div>
-                            ) : (
-                                "Delete"
-                            )}
-                        </Button>
-                    </div>
-                </DialogContent>
-            </Dialog>
+                            Delete {queue.length} item{queue.length !== 1 ? "s" : ""}?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will permanently delete all {queue.length} item{queue.length !== 1 ? "s" : ""} in the queue. This action <strong>cannot be undone</strong>.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+
+                    {/* Progress bar during deletion */}
+                    {deleting && progress && (
+                        <div className="px-4 py-3 bg-muted/20 rounded-lg space-y-2 my-2">
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                <span className="flex items-center gap-1.5">
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    Deleting…
+                                </span>
+                                <span className="tabular-nums font-semibold">
+                                    {progress.processed}/{progress.total}
+                                </span>
+                            </div>
+                            <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                                <div
+                                    className="h-full bg-destructive rounded-full transition-all duration-300"
+                                    style={{ width: `${Math.round((progress.processed / progress.total) * 100)}%` }}
+                                />
+                            </div>
+                            <p className="text-[10px] text-muted-foreground truncate opacity-70" title={progress.current}>
+                                {progress.current}
+                            </p>
+                        </div>
+                    )}
+
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={(e) => { e.preventDefault(); confirmDeleteAll(); }}
+                            disabled={deleting}
+                            className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                        >
+                            {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : null}
+                            {deleting ? "Deleting…" : "Delete all"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* ── Confirm Delete SINGLE ──────────────────────────────────── */}
+            {/* Bug fix #2: confirmation before single-item delete */}
+            <AlertDialog open={confirmSingleOpen} onOpenChange={setConfirmSingleOpen}>
+                <AlertDialogContent className="rounded-2xl max-w-sm">
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="flex items-center gap-2">
+                            <Trash2 className="w-4 h-4 text-destructive" />
+                            Delete this file?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            <strong className="text-foreground">{pendingSingleEntry?.name}</strong> will be permanently deleted. This cannot be undone.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setPendingSingleEntry(null)}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={confirmDeleteSingle}
+                            className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                        >
+                            Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </>
     );
-}
+};

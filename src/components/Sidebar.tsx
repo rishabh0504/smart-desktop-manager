@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { motion } from "framer-motion";
 
 import { homeDir } from "@tauri-apps/api/path";
 
@@ -46,17 +47,20 @@ export const Sidebar = () => {
         homeDir().then(setHomePath);
     }, [refreshVolumes, settings.explorer.show_system_files]);
 
-    if (isCollapsed) return null;
-
     // Filter volumes
     const externalDrives = volumes.filter(v => v.is_removable && v.mount_point !== "/");
-    // const systemVolumes = volumes.filter(v => !v.is_removable || v.mount_point === "/"); // Maybe hide system volume if redundant?
 
     return (
-        <div className="w-64 h-full bg-muted/10 border-r flex flex-col transition-all duration-300 ease-in-out select-none">
-            {/* Top section now only contains generic layout padding or empty if all views are footer-based */}
-
-            <ScrollArea className="flex-1">
+        <motion.div
+            initial={false}
+            animate={{
+                width: isCollapsed ? 0 : 256,
+                opacity: isCollapsed ? 0 : 1,
+            }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className="h-full bg-muted/10 border-r flex flex-col overflow-hidden select-none"
+        >
+            <ScrollArea className="flex-1 w-64">
                 <div className="p-3 space-y-6">
                     {/* Places (User Home Folders) */}
                     {homePath && (
@@ -147,8 +151,7 @@ export const Sidebar = () => {
                     )}
                 </div>
             </ScrollArea>
-
-        </div>
+        </motion.div>
     );
 };
 
@@ -216,8 +219,8 @@ const TreeItem = ({ node, depth, icon, subLabel }: TreeItemProps) => {
                 sources,
                 destinationDir: node.path
             });
-            // Refresh would ideally happen here, but since it's sidebar, 
-            // the main explorer view might need refresh if it's showing the target.
+            // Refresh
+            refreshVolumes();
         } catch (err) {
             console.error("Drop failed:", err);
         }
@@ -308,12 +311,12 @@ const TreeItem = ({ node, depth, icon, subLabel }: TreeItemProps) => {
                     )}
                 </div>
             </ContextMenuTrigger>
-            <ContextMenuContent className="w-56">
-                <ContextMenuItem onClick={() => handlePathClick(node.path)}>
+            <ContextMenuContent className="w-56 text-xs border-muted-foreground/20 bg-background/95 backdrop-blur-sm">
+                <ContextMenuItem onClick={() => handlePathClick(node.path)} className="gap-2">
                     Open
                 </ContextMenuItem>
-                <ContextMenuItem onClick={handleAddToDedupe}>
-                    <CopyCheck className="w-4 h-4 mr-2" />
+                <ContextMenuItem onClick={handleAddToDedupe} className="gap-2">
+                    <CopyCheck className="w-3.5 h-3.5 text-primary" />
                     Find Duplicates
                 </ContextMenuItem>
                 <ContextMenuItem onClick={(e) => {
@@ -321,13 +324,13 @@ const TreeItem = ({ node, depth, icon, subLabel }: TreeItemProps) => {
                     addToClean(node.path);
                     toast.success("Added to Clean View queue");
                     setActiveView("clean");
-                }}>
-                    <Eraser className="w-4 h-4 mr-2" />
+                }} className="gap-2">
+                    <Eraser className="w-3.5 h-3.5 text-orange-500" />
                     Clean Empty Folders
                 </ContextMenuItem>
                 <ContextMenuSeparator />
-                <ContextMenuItem onClick={handleRename}>
-                    <Pencil className="w-4 h-4 mr-2" />
+                <ContextMenuItem onClick={handleRename} className="gap-2">
+                    <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
                     Rename
                 </ContextMenuItem>
             </ContextMenuContent>

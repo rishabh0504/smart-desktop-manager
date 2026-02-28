@@ -20,7 +20,7 @@ import {
     RotateCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -34,8 +34,7 @@ import {
 import { isVideoExtension } from "@/lib/fileTypes";
 import { FilePreviewContent } from "./FilePreviewContent";
 
-// ─── Component ──────────────────────────────────────────────────────────────
-
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function findAdjacentFile(
     entries: any[],
@@ -53,7 +52,7 @@ function findAdjacentFile(
     return -1;
 }
 
-// ─── Component ──────────────────────────────────────────────────────────────
+// ─── Component ───────────────────────────────────────────────────────────────
 
 export const PreviewModal = () => {
     const target = usePreviewStore((s) => s.target);
@@ -91,13 +90,40 @@ export const PreviewModal = () => {
     const ext = (target?.extension ?? "").toLowerCase();
     const isRotatable = [
         "jpg", "jpeg", "png", "webp", "svg",
-        ...[] /* video extensions handled by isVideoExtension below */
     ].includes(ext) || isVideoExtension(ext);
     const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext);
     const isVideo = isVideoExtension(ext);
     const isAudio = ["mp3", "wav", "ogg", "flac", "aac", "m4a"].includes(ext);
     const isText = ["txt", "md", "js", "ts", "tsx", "jsx", "json", "rs", "css", "html", "py", "sh", "yml", "yaml", "toml"].includes(ext);
     const isPdf = ext === "pdf";
+
+    // ── Stable refs: break dependency cycle in keydown useEffect ──────────
+    //
+    // The keydown handler needs up-to-date `currentEntries`, `target`,
+    // `rotation`, etc. but must NOT be re-registered on every render —
+    // that is the primary cause of the "key-repeat storm" that hangs the
+    // system. We satisfy both constraints by putting mutable values into
+    // refs and reading from them inside the stable handler closure.
+
+    const entriesRef = useRef(currentEntries);
+    const targetRef = useRef(target);
+    const rotationRef = useRef(rotation);
+    const isTheatricalRef = useRef(isTheatrical);
+    const isRotatableRef = useRef(isRotatable);
+
+    useEffect(() => { entriesRef.current = currentEntries; }, [currentEntries]);
+    useEffect(() => { targetRef.current = target; }, [target]);
+    useEffect(() => { rotationRef.current = rotation; }, [rotation]);
+    useEffect(() => { isTheatricalRef.current = isTheatrical; }, [isTheatrical]);
+    useEffect(() => { isRotatableRef.current = isRotatable; }, [isRotatable]);
+
+    // ── Navigation guard — prevents re-entrant / key-repeat storms ─────────
+    //
+    // A plain boolean ref (not state) so setting it never triggers a
+    // re-render. Cleared after 150 ms — enough for React to flush the
+    // openPreview state update and for the OS key-repeat debounce to settle.
+
+    const isNavigating = useRef(false);
 
     // ── Effects ────────────────────────────────────────────────────────────
 
@@ -118,64 +144,85 @@ export const PreviewModal = () => {
     // ── Navigation ─────────────────────────────────────────────────────────
 
     const handleNext = useCallback(() => {
-        if (!target || !currentEntries.length) return;
-        const index = currentEntries.findIndex((e: any) => e.path === target.path);
+        // Guard: skip if a navigation is already in-flight (key-repeat protection)
+        if (isNavigating.current) return;
+        const entries = entriesRef.current;
+        const tgt = targetRef.current;
+        if (!tgt || !entries.length) return;
+
+        const index = entries.findIndex((e: any) => e.path === tgt.path);
         if (index === -1) return;
-        const nextIndex = findAdjacentFile(currentEntries, index, 1);
+        const nextIndex = findAdjacentFile(entries, index, 1);
         if (nextIndex !== -1) {
+            isNavigating.current = true;
             resetRotation();
-            openPreview({ ...currentEntries[nextIndex], path: currentEntries[nextIndex].canonical_path });
+            openPreview({ ...entries[nextIndex], path: entries[nextIndex].canonical_path });
+            setTimeout(() => { isNavigating.current = false; }, 150);
         }
-    }, [target, currentEntries, openPreview, resetRotation]);
+    }, [openPreview, resetRotation]);
 
     const handlePrev = useCallback(() => {
-        if (!target || !currentEntries.length) return;
-        const index = currentEntries.findIndex((e: any) => e.path === target.path);
+        if (isNavigating.current) return;
+        const entries = entriesRef.current;
+        const tgt = targetRef.current;
+        if (!tgt || !entries.length) return;
+
+        const index = entries.findIndex((e: any) => e.path === tgt.path);
         if (index === -1) return;
-        const prevIndex = findAdjacentFile(currentEntries, index, -1);
+        const prevIndex = findAdjacentFile(entries, index, -1);
         if (prevIndex !== -1) {
+            isNavigating.current = true;
             resetRotation();
-            openPreview({ ...currentEntries[prevIndex], path: currentEntries[prevIndex].canonical_path });
+            openPreview({ ...entries[prevIndex], path: entries[prevIndex].canonical_path });
+            setTimeout(() => { isNavigating.current = false; }, 150);
         }
-    }, [target, currentEntries, openPreview, resetRotation]);
+    }, [openPreview, resetRotation]);
 
     // ── Actions ────────────────────────────────────────────────────────────
 
     const handleToggleDeleteQueue = useCallback(() => {
-        if (!target) return;
-        if (isInDeleteQueue) {
-            removeFromDeleteQueue(target.path);
+        const tgt = targetRef.current;
+        if (!tgt) return;
+        if (deleteQueue.some((e) => e.path === tgt.path)) {
+            removeFromDeleteQueue(tgt.path);
             toast.info("Removed from delete queue");
         } else {
-            addToDeleteQueue({ ...target, canonical_path: target.canonical_path || target.path });
+            addToDeleteQueue({ ...tgt, canonical_path: tgt.canonical_path || tgt.path });
             toast.success("Added to delete queue");
         }
-    }, [target, isInDeleteQueue, addToDeleteQueue, removeFromDeleteQueue]);
+    }, [deleteQueue, addToDeleteQueue, removeFromDeleteQueue]);
 
     const handleToggleMoveQueue = useCallback(() => {
-        if (!target) return;
+        const tgt = targetRef.current;
+        if (!tgt) return;
         if (isInMoveQueue) {
-            moveQueueIdsContainingTarget.forEach((queueId) => removeFromMoveQueue(queueId, target.path));
+            moveQueueIdsContainingTarget.forEach((queueId) => removeFromMoveQueue(queueId, tgt.path));
             toast.info("Removed from move queue");
         } else {
             if (!selectedMoveQueueId) {
                 toast.error("Select a move queue first");
                 return;
             }
-            addToMoveQueue(selectedMoveQueueId, { ...target, canonical_path: target.canonical_path || target.path });
+            addToMoveQueue(selectedMoveQueueId, { ...tgt, canonical_path: tgt.canonical_path || tgt.path });
             toast.success("Added to move queue");
         }
-    }, [target, isInMoveQueue, selectedMoveQueueId, addToMoveQueue, moveQueueIdsContainingTarget, removeFromMoveQueue]);
+    }, [isInMoveQueue, selectedMoveQueueId, addToMoveQueue, moveQueueIdsContainingTarget, removeFromMoveQueue]);
 
     const handleShowInFinder = useCallback(() => {
-        if (target) invoke("show_in_finder", { path: target.path });
-    }, [target]);
+        const tgt = targetRef.current;
+        if (tgt) invoke("show_in_finder", { path: tgt.path });
+    }, []);
 
     const handleOpenWithApp = useCallback(() => {
-        if (target) invoke("open_item", { path: target.path });
-    }, [target]);
+        const tgt = targetRef.current;
+        if (tgt) invoke("open_item", { path: tgt.path });
+    }, []);
 
     // ── Keyboard navigation ────────────────────────────────────────────────
+    //
+    // KEY FIX: this effect only depends on `isOpen` (a boolean).
+    // All mutable values are accessed via refs, so the listener is
+    // registered exactly once per open/close cycle — no churn.
 
     useEffect(() => {
         if (!isOpen) return;
@@ -183,9 +230,12 @@ export const PreviewModal = () => {
         const onKeyDown = (e: KeyboardEvent) => {
             const noMod = !e.metaKey && !e.ctrlKey && !e.altKey;
 
-            if (e.key === "ArrowRight") {
+            if (e.key === "ArrowRight" && noMod) {
+                // Prevent browser scroll / text cursor movement
+                e.preventDefault();
                 handleNext();
-            } else if (e.key === "ArrowLeft") {
+            } else if (e.key === "ArrowLeft" && noMod) {
+                e.preventDefault();
                 handlePrev();
             } else if (e.key === "Delete" || ((e.metaKey || e.ctrlKey) && e.key === "Backspace")) {
                 e.preventDefault();
@@ -195,16 +245,18 @@ export const PreviewModal = () => {
                 handleOpenWithApp();
             } else if ((e.key === "f" || e.key === "F") && noMod) {
                 setIsTheatrical((prev) => !prev);
-            } else if (e.key === "Escape" && isTheatrical) {
+            } else if (e.key === "Escape" && isTheatricalRef.current) {
                 setIsTheatrical(false);
-            } else if ((e.key === "r" || e.key === "R") && noMod && isRotatable) {
-                setRotation((rotation + 90) % 360);
+            } else if ((e.key === "r" || e.key === "R") && noMod && isRotatableRef.current) {
+                setRotation((rotationRef.current + 90) % 360);
             }
         };
 
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
-    }, [isOpen, isTheatrical, isRotatable, rotation, handleNext, handlePrev, handleToggleDeleteQueue, handleOpenWithApp, setRotation]);
+        // Intentionally only re-register when the modal opens/closes.
+        // All other values are read from refs inside the handler.
+    }, [isOpen, handleNext, handlePrev, handleToggleDeleteQueue, handleOpenWithApp, setRotation]);
 
     // ── Render guard ───────────────────────────────────────────────────────
 

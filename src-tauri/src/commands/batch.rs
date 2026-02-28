@@ -54,6 +54,15 @@ pub struct BatchFinished {
     pub failed_paths: Vec<String>,
 }
 
+/// Returns only the paths that currently exist on disk.
+/// Used by the frontend to prune queued files that were deleted externally (e.g. via Finder).
+#[tauri::command]
+pub fn check_paths_exist(paths: Vec<String>) -> Vec<String> {
+    paths.into_iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .collect()
+}
+
 #[tauri::command]
 pub async fn delete_items(
     app: AppHandle,

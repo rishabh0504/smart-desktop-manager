@@ -55,9 +55,12 @@ pub async fn find_content_by_category<R: Runtime>(
             
             let _ = app_handle.emit("content-progress", ProgressEvent {
                 scanned: scanned_clone.load(Ordering::Relaxed),
-                duplicates_found: 0, // Not used for category search
+                duplicates_found: 0,
                 current_path,
                 status: "Scanning folders...".to_string(),
+                percent: 0,
+                phase: 0,
+                total_files: 0,
                 elapsed_ms: start_time.elapsed().as_millis() as u64,
             });
         }
@@ -134,6 +137,9 @@ pub async fn find_content_by_category<R: Runtime>(
         duplicates_found: 0,
         current_path: "Scan complete".to_string(),
         status: "Done".to_string(),
+        percent: 100,
+        phase: 3,
+        total_files: 0,
         elapsed_ms: start_time.elapsed().as_millis() as u64,
     });
 

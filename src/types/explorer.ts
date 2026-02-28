@@ -73,6 +73,8 @@ export interface ConfigSection {
     show_system_files: boolean;
     blocked_extensions: string[];
     blocked_names: string[];
+    /** Number of worker threads (dedupe). undefined = use all logical CPUs. */
+    thread_count?: number;
 }
 
 export interface ThemeSettings {

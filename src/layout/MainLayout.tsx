@@ -7,6 +7,7 @@ import { Search, Sun, Moon, Settings, Keyboard, Menu, Plus, Trash2, FolderInput 
 import { useTheme } from "@/components/theme-provider";
 import { PreviewModal } from "@/components/PreviewModal";
 import { Sidebar } from "@/components/Sidebar";
+import { InspectorSidebar } from "@/components/InspectorSidebar";
 import { StatusBar } from "@/components/StatusBar";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { useSidebarStore } from "@/stores/sidebarStore";
@@ -24,6 +25,7 @@ import { useMoveQueueStore } from "@/stores/moveQueueStore";
 import { ThemeApplier } from "@/components/ThemeApplier";
 import { CleanTab } from "@/components/CleanTab";
 import { ActivityBar } from "@/components/ActivityBar";
+import { PanelLeft, PanelRight } from "lucide-react";
 
 export const MainLayout = () => {
     const tabs = useExplorerStore((state) => state.tabs);
@@ -34,7 +36,7 @@ export const MainLayout = () => {
     const closeTab = useExplorerStore((state) => state.closeTab);
 
     const { theme, setTheme } = useTheme();
-    const { toggleSidebar } = useSidebarStore();
+    const { isCollapsed, toggleSidebar, isRightSidebarOpen, toggleRightSidebar } = useSidebarStore();
     const { items } = useListStore();
 
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -54,12 +56,17 @@ export const MainLayout = () => {
 
             switch (e.key.toLowerCase()) {
                 case "f":
+                    if (e.shiftKey) break; // Allow OS search
                     e.preventDefault();
                     useExplorerStore.getState().addSearchResultsTab([], "");
                     break;
                 case "b":
                     e.preventDefault();
                     toggleSidebar();
+                    break;
+                case "i":
+                    e.preventDefault();
+                    toggleRightSidebar();
                     break;
                 case ",":
                     e.preventDefault();
@@ -75,12 +82,7 @@ export const MainLayout = () => {
                     break;
                 case "n":
                     e.preventDefault();
-                    if (e.shiftKey) {
-                        // Trigger new folder logic if a tab is active
-                        // This would ideally emit an event to the active FilePanel
-                    } else {
-                        addTab("/");
-                    }
+                    addTab("/");
                     break;
                 case "1":
                     e.preventDefault();
@@ -103,7 +105,7 @@ export const MainLayout = () => {
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [toggleSidebar, activeTabId, closeTab, addTab, setActiveView]);
+    }, [toggleSidebar, toggleRightSidebar, activeTabId, closeTab, addTab, setActiveView, activeView]);
 
     return (
         <div className="flex flex-col h-screen w-full bg-background overflow-hidden text-foreground">
@@ -114,10 +116,11 @@ export const MainLayout = () => {
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-muted-foreground"
+                        className={cn("h-8 w-8 transition-colors", !isCollapsed ? "text-primary bg-primary/10" : "text-muted-foreground")}
                         onClick={toggleSidebar}
+                        title="Toggle Sidebar (⌘B)"
                     >
-                        <Menu className="w-4 h-4" />
+                        <PanelLeft className="w-4 h-4" />
                     </Button>
                     <div className="flex items-center gap-2">
                         <h1 className="text-sm font-bold tracking-tight">SuperExplorer</h1>
@@ -200,6 +203,16 @@ export const MainLayout = () => {
                         )}
                     </Button>
 
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn("h-8 w-8 transition-colors", isRightSidebarOpen ? "text-primary bg-primary/10" : "text-muted-foreground")}
+                        onClick={toggleRightSidebar}
+                        title="Toggle Inspector (⌘I)"
+                    >
+                        <PanelRight className="w-4 h-4" />
+                    </Button>
+
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSettingsOpen(true)}>
                         <Settings className="h-4 w-4" />
                     </Button>
@@ -243,6 +256,7 @@ export const MainLayout = () => {
                     )}
                 </div>
 
+                <InspectorSidebar />
                 <ListTray open={trayOpen} onClose={() => setTrayOpen(false)} />
             </div>
 

@@ -8,11 +8,13 @@ interface SidebarState {
     treeNodes: Record<string, TreeNode[]>; // path -> children
     expandedPaths: Set<string>;
     isCollapsed: boolean;
+    isRightSidebarOpen: boolean;
     loading: boolean;
 
     // Actions
     refreshVolumes: () => Promise<void>;
     toggleSidebar: () => void;
+    toggleRightSidebar: () => void;
     addFavorite: (path: string) => void;
     removeFavorite: (path: string) => void;
     handlePathClick: (path: string) => void;
@@ -27,6 +29,7 @@ export const useSidebarStore = create<SidebarState>((set, get) => ({
     treeNodes: {},
     expandedPaths: new Set(),
     isCollapsed: false,
+    isRightSidebarOpen: true,
     loading: false,
 
     refreshVolumes: async () => {
@@ -41,6 +44,8 @@ export const useSidebarStore = create<SidebarState>((set, get) => ({
     },
 
     toggleSidebar: () => set((state) => ({ isCollapsed: !state.isCollapsed })),
+
+    toggleRightSidebar: () => set((state) => ({ isRightSidebarOpen: !state.isRightSidebarOpen })),
 
     addFavorite: (path) => set((state) => ({
         favorites: state.favorites.includes(path) ? state.favorites : [...state.favorites, path]

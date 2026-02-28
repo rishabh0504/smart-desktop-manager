@@ -15,20 +15,87 @@ interface FilePreviewContentProps {
     section: "explorer" | "dedupe" | "content_search";
 }
 
-function VideoPreview({ src, className }: { src: string; className?: string }) {
+// Browser-native video formats Chromium can decode without external codecs.
+// Anything outside this set will stall indefinitely — show a fallback instead.
+const CHROMIUM_NATIVE_VIDEO_EXTS = new Set([
+    'mp4', 'm4v', 'webm', 'ogg', 'ogv', 'm3u8',
+]);
+
+function VideoPreview({ src, ext, className }: { src: string; ext: string; className?: string }) {
     const videoRef = useRef<HTMLVideoElement>(null);
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const volume = usePreviewStore((state) => state.volume);
     const isMuted = usePreviewStore((state) => state.isMuted);
     const setVolume = usePreviewStore((state) => state.setVolume);
     const setIsMuted = usePreviewStore((state) => state.setIsMuted);
     const rotation = usePreviewStore((state) => state.rotation);
+    const [unsupported, setUnsupported] = useState(false);
+
+    // If this extension is known-unsupported, bail immediately — no DOM stall.
+    const knownUnsupported = !CHROMIUM_NATIVE_VIDEO_EXTS.has(ext.toLowerCase().replace(/^\./, ''));
 
     useEffect(() => {
+        // Reset when source changes
+        setUnsupported(false);
         const el = videoRef.current;
         if (!el) return;
         el.muted = isMuted;
         el.volume = volume;
     }, [src, isMuted, volume]);
+
+    useEffect(() => {
+        if (knownUnsupported) return; // Already showing fallback
+        const el = videoRef.current;
+        if (!el) return;
+
+        const markUnsupported = () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+            setUnsupported(true);
+        };
+
+        const onCanPlay = () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+        };
+
+        // 4s timeout starting from first 'stalled' or 'waiting' event.
+        // If the video never becomes playable, assume codec unsupported.
+        const armTimeout = () => {
+            if (timerRef.current) return; // Only arm once
+            timerRef.current = setTimeout(markUnsupported, 4000);
+        };
+
+        el.addEventListener('error', markUnsupported);
+        el.addEventListener('canplay', onCanPlay);
+        el.addEventListener('stalled', armTimeout);
+        el.addEventListener('waiting', armTimeout);
+
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+            timerRef.current = null;
+            el.removeEventListener('error', markUnsupported);
+            el.removeEventListener('canplay', onCanPlay);
+            el.removeEventListener('stalled', armTimeout);
+            el.removeEventListener('waiting', armTimeout);
+        };
+    }, [src, knownUnsupported]);
+
+    if (knownUnsupported || unsupported) {
+        return (
+            <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground p-8 text-center">
+                <div className="w-16 h-16 rounded-2xl bg-muted/30 flex items-center justify-center">
+                    <span className="text-3xl">🎬</span>
+                </div>
+                <div>
+                    <p className="text-sm font-semibold">
+                        {ext ? ext.toUpperCase() : 'This format'} can't be previewed
+                    </p>
+                    <p className="text-xs opacity-60 mt-1 max-w-[240px]">
+                        This codec isn't supported by the built-in player. Open the file with an external app to play it.
+                    </p>
+                </div>
+            </div>
+        );
+    }
 
     const handleVolumeChange = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
         const el = e.currentTarget;
@@ -48,6 +115,7 @@ function VideoPreview({ src, className }: { src: string; className?: string }) {
         />
     );
 }
+
 
 export const FilePreviewContent = ({ path, extension, name, is_dir, className, section }: FilePreviewContentProps) => {
     const [content, setContent] = useState<string | null>(null);
@@ -178,7 +246,7 @@ export const FilePreviewContent = ({ path, extension, name, is_dir, className, s
             )}
 
             {isVideo && content && !previewError && (
-                <VideoPreview src={content} className="w-full h-auto aspect-video object-contain shadow-2xl rounded-sm" />
+                <VideoPreview ext={ext} src={content} className="w-full h-auto aspect-video object-contain shadow-2xl rounded-sm" />
             )}
 
             {isAudio && !previewError && (

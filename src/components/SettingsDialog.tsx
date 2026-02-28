@@ -349,6 +349,55 @@ const ConfigSectionView = ({ section }: { section: "explorer" | "dedupe" | "cont
                     </section>
                 </div>
             )}
+            {/* ── Thread Count (dedupe only) ─────────────────────────── */}
+            {section === "dedupe" && (
+                <section className="space-y-3">
+                    <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                        <Settings2 className="w-3 h-3" /> Scan Threads
+                    </h3>
+                    <p className="text-[10px] text-muted-foreground">
+                        Number of CPU threads used for parallel hashing.
+                        Leave blank (or set to 0) to use all logical CPUs automatically.
+                    </p>
+                    <div className="flex items-center gap-3 max-w-[200px]">
+                        <Input
+                            type="number"
+                            min={0}
+                            max={64}
+                            value={settings.thread_count ?? ""}
+                            placeholder="Auto"
+                            onChange={(e) => {
+                                const raw = e.target.value;
+                                if (raw === "" || raw === "0") {
+                                    updateSettings(section, { thread_count: undefined });
+                                } else {
+                                    const n = Math.max(1, Math.min(64, Math.round(Number(raw))));
+                                    if (Number.isFinite(n)) updateSettings(section, { thread_count: n });
+                                }
+                            }}
+                            className="h-8 text-xs"
+                        />
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-3 text-[11px]"
+                            onClick={() => updateSettings(section, { thread_count: undefined })}
+                        >
+                            Auto
+                        </Button>
+                    </div>
+                    {settings.thread_count != null && settings.thread_count > 0 && (
+                        <p className="text-[10px] text-primary font-semibold">
+                            Using {settings.thread_count} thread{settings.thread_count !== 1 ? "s" : ""}
+                        </p>
+                    )}
+                    {(settings.thread_count == null || settings.thread_count === 0) && (
+                        <p className="text-[10px] text-muted-foreground/60">
+                            Using all logical CPUs (auto)
+                        </p>
+                    )}
+                </section>
+            )}
         </>
     );
 };

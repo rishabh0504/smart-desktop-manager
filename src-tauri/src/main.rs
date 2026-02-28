@@ -7,7 +7,7 @@ mod utils;
 use commands::dir::{read_dir_chunked, create_folder, create_file, rename_item};
 use commands::copy::start_copy;
 use commands::move_op::start_move;
-use commands::batch::{delete_items, batch_copy, batch_move, fast_copy};
+use commands::batch::{delete_items, batch_copy, batch_move, fast_copy, check_paths_exist};
 use commands::thumbnails::{get_thumbnail, get_video_thumbnail};
 use commands::preview_op::{get_file_text_content, get_file_base64_content, get_file_blob, show_in_finder, open_item};
 use commands::operation::cancel_operation;
@@ -123,6 +123,7 @@ fn main() {
             start_copy,
             start_move,
             delete_items,
+            check_paths_exist,
             batch_copy,
             batch_move,
             fast_copy,

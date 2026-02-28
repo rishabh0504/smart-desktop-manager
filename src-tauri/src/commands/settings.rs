@@ -28,6 +28,10 @@ pub struct ConfigSection {
     pub show_system_files: bool,
     pub blocked_extensions: Vec<String>,
     pub blocked_names: Vec<String>,
+    /// Number of worker threads for parallel operations (dedupe hashing).
+    /// None = use all logical CPUs.
+    #[serde(default)]
+    pub thread_count: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -86,6 +90,7 @@ impl Default for ConfigSection {
                 "pnpm-lock.yaml".to_string(), "yarn.lock".to_string(), ".gitignore".to_string(),
                 ".DS_Store".to_string()
             ],
+            thread_count: None,
         }
     }
 }
@@ -144,6 +149,7 @@ pub fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
             show_system_files: old.show_system_files,
             blocked_extensions: old.blocked_extensions,
             blocked_names: Vec::new(),
+            thread_count: None,
         };
         new.dedupe = new.explorer.clone();
         new.content_search = new.explorer.clone();
