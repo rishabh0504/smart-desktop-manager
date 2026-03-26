@@ -80,6 +80,14 @@ pub async fn read_dir_chunked(
             if settings.blocked_extensions.contains(ext) {
                 continue;
             }
+            if !settings.preview_enabled.is_extension_enabled(ext) {
+                continue;
+            }
+        } else {
+            // No extension - check "other" category
+            if !settings.preview_enabled.other {
+                continue;
+            }
         }
 
         let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);

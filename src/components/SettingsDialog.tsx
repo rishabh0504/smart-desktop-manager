@@ -263,6 +263,12 @@ const ConfigSectionView = ({ section }: { section: "explorer" | "dedupe" | "cont
                             active={settings.preview_enabled.archive}
                             onClick={() => updatePreviewSettings(section, { archive: !settings.preview_enabled.archive })}
                         />
+                        <PreviewToggle
+                            label="Other"
+                            icon={<LayoutGrid className="w-4 h-4" />}
+                            active={settings.preview_enabled.other}
+                            onClick={() => updatePreviewSettings(section, { other: !settings.preview_enabled.other })}
+                        />
                     </div>
                 </section>
             )}

@@ -15,6 +15,46 @@ pub struct PreviewSettings {
     pub other: bool,
 }
 
+impl PreviewSettings {
+    pub fn is_extension_enabled(&self, ext: &str) -> bool {
+        let ext = ext.to_lowercase();
+        let ext = ext.trim_start_matches('.');
+
+        if is_video_extension(ext) { return self.video; }
+        if is_image_extension(ext) { return self.image; }
+        if is_audio_extension(ext) { return self.audio; }
+        if is_text_extension(ext) { return self.text; }
+        if is_document_extension(ext) { return self.document; }
+        if is_archive_extension(ext) { return self.archive; }
+        
+        self.other
+    }
+}
+
+fn is_video_extension(ext: &str) -> bool {
+    matches!(ext, "mp4" | "m4v" | "webm" | "mkv" | "mov" | "avi" | "wmv" | "asf" | "ts" | "mts" | "m2ts" | "m3u8" | "mpeg" | "mpg" | "mp2" | "mpe" | "mpv" | "flv" | "f4v" | "3gp" | "3g2" | "ogv" | "vob" | "rm" | "rmvb" | "divx" | "mk3d" | "qt" | "hevc" | "h265" | "h264")
+}
+
+fn is_image_extension(ext: &str) -> bool {
+    matches!(ext, "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "svg" | "avif" | "heic" | "heif" | "tiff" | "tif" | "ico" | "icns" | "raw" | "cr2" | "nef" | "arw" | "dng" | "orf" | "rw2" | "jfif" | "pjpeg" | "pjp")
+}
+
+fn is_audio_extension(ext: &str) -> bool {
+    matches!(ext, "mp3" | "wav" | "ogg" | "oga" | "flac" | "m4a" | "aac" | "wma" | "aiff" | "aif" | "alac" | "opus" | "mid" | "midi" | "amr" | "ape" | "wv" | "caf")
+}
+
+fn is_text_extension(ext: &str) -> bool {
+    matches!(ext, "txt" | "md" | "markdown" | "js" | "mjs" | "cjs" | "ts" | "jsx" | "tsx" | "json" | "jsonc" | "yaml" | "yml" | "html" | "htm" | "css" | "scss" | "sass" | "xml" | "csv" | "tsv" | "sql" | "sh" | "bash" | "zsh" | "ps1" | "env" | "ini" | "conf" | "config" | "toml" | "py" | "rs" | "java" | "c" | "cpp" | "h" | "hpp" | "go" | "php" | "rb" | "swift" | "kt" | "dart" | "r" | "lua" | "pl")
+}
+
+fn is_document_extension(ext: &str) -> bool {
+    matches!(ext, "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "odt" | "ods" | "odp" | "pages" | "numbers" | "key" | "rtf")
+}
+
+fn is_archive_extension(ext: &str) -> bool {
+    matches!(ext, "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" | "iso" | "cab" | "ar" | "lz" | "lzma" | "z" | "war" | "ear")
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ThemeSettings {
     pub use_custom_color: bool,

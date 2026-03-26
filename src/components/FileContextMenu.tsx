@@ -19,8 +19,10 @@ import { usePreviewStore } from "@/stores/previewStore";
 import { useDedupeStore } from "@/stores/dedupeStore";
 import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
 import { useMoveQueueStore } from "@/stores/moveQueueStore";
+import { useFavouritesStore } from "@/stores/favouritesStore";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { CopyCheck, FolderPlus, Pencil, Trash2, FolderInput, Archive, FileArchive } from "lucide-react";
+import { CopyCheck, FolderPlus, Pencil, Trash2, FolderInput, Archive, FileArchive, Star } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 interface FileContextMenuProps {
     children: React.ReactNode;
@@ -37,6 +39,8 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
     const addToDedupe = useDedupeStore((state) => state.addToQueue);
     const addToDeleteQueue = useDeleteQueueStore((state) => state.addToQueue);
     const { queues, addQueue: addMoveQueue, addToQueue: addToMoveQueue, updateQueue } = useMoveQueueStore();
+    const toggleFavourite = useFavouritesStore((state) => state.toggleQueue);
+    const isInFavourites = useFavouritesStore((state) => state.isInQueue);
     const setActiveView = useExplorerStore((state) => state.setActiveView);
     const currentTab = useExplorerStore((state) => state.tabs.find(t => t.id === tabId));
 
@@ -100,6 +104,16 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
             addMoveQueue(name, entry.path);
             toast.success(`Created queue "${name}" with this folder as destination`);
         }
+    };
+
+    const handleToggleFavourite = () => {
+        targetEntries.forEach(e => toggleFavourite(e));
+        const isNowIn = !isInFavourites(entry.path);
+        toast.success(
+            targetEntries.length === 1
+                ? (isNowIn ? `"${entry.name}" added to favourites` : `"${entry.name}" removed from favourites`)
+                : (isNowIn ? `${targetEntries.length} items added to favourites` : `${targetEntries.length} items removed from favourites`)
+        );
     };
 
     const handleShowInFinder = () => {
@@ -257,6 +271,10 @@ export const FileContextMenu = ({ children, entry, tabId }: FileContextMenuProps
                 <ContextMenuTrigger>{children}</ContextMenuTrigger>
                 <ContextMenuContent className="w-48 text-xs [&_button]:text-xs">
                     <ContextMenuItem onClick={handleOpen} className="text-xs">Open</ContextMenuItem>
+                    <ContextMenuItem onClick={handleToggleFavourite} className="text-xs">
+                        <Star className={cn("w-3.5 h-3.5 mr-2", isInFavourites(entry.path) ? "fill-primary text-primary" : "")} />
+                        {isInFavourites(entry.path) ? "Remove from favourites" : "Add to favourites"}
+                    </ContextMenuItem>
                     {entry.is_dir && (
                         <ContextMenuItem onClick={handleAddToDedupe} className="text-xs">
                             <CopyCheck className="w-3.5 h-3.5 mr-2" /> Find duplicates

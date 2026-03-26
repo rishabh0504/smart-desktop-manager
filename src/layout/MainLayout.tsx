@@ -3,11 +3,11 @@ import { FilePanel } from "@/panels/FilePanel";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { SearchResultsPanel } from "@/components/SearchResultsPanel";
 import { Button } from "@/components/ui/button";
-import { Search, Sun, Moon, Settings, Keyboard, Menu, Plus, Trash2, FolderInput } from "lucide-react";
+import { Search, Sun, Moon, Settings, Keyboard, Menu, Plus, Trash2, FolderInput, Star } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { PreviewModal } from "@/components/PreviewModal";
 import { Sidebar } from "@/components/Sidebar";
-import { InspectorSidebar } from "@/components/InspectorSidebar";
+// import { InspectorSidebar } from "@/components/InspectorSidebar";
 import { StatusBar } from "@/components/StatusBar";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { useSidebarStore } from "@/stores/sidebarStore";
@@ -22,6 +22,8 @@ import { DeleteQueueModal } from "@/components/DeleteQueueModal";
 import { MoveQueueManagerModal } from "@/components/MoveQueueManagerModal";
 import { useDeleteQueueStore } from "@/stores/deleteQueueStore";
 import { useMoveQueueStore } from "@/stores/moveQueueStore";
+import { useFavouritesStore } from "@/stores/favouritesStore";
+import { FavouritesManagerModal } from "@/components/FavouritesManagerModal";
 import { ThemeApplier } from "@/components/ThemeApplier";
 import { CleanTab } from "@/components/CleanTab";
 import { ActivityBar } from "@/components/ActivityBar";
@@ -48,6 +50,8 @@ export const MainLayout = () => {
     );
     const moveQueueManagerOpen = useMoveQueueStore((s) => s.openManager);
     const setMoveQueueManagerOpen = useMoveQueueStore((s) => s.setOpenManager);
+    const [favouritesOpen, setFavouritesOpen] = useState(false);
+    const favouritesCount = useFavouritesStore((s) => s.items.length);
 
 
     useEffect(() => {
@@ -134,6 +138,26 @@ export const MainLayout = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                            "h-8 px-2 gap-1.5 text-xs font-bold",
+                            favouritesCount > 0
+                                ? "text-primary hover:bg-primary/10"
+                                : "text-muted-foreground hover:text-primary"
+                        )}
+                        onClick={() => setFavouritesOpen(true)}
+                        title="Favourites manager"
+                    >
+                        <Star className={cn("h-4 w-4", favouritesCount > 0 && "fill-primary/20")} />
+                        {favouritesCount > 0 && (
+                            <span className="min-w-[1.25rem] h-5 px-1 rounded bg-primary/20 text-primary flex items-center justify-center">
+                                {favouritesCount}
+                            </span>
+                        )}
+                    </Button>
+
                     <Button
                         variant="ghost"
                         size="sm"
@@ -256,7 +280,7 @@ export const MainLayout = () => {
                     )}
                 </div>
 
-                <InspectorSidebar />
+                {/* <InspectorSidebar /> */}
                 <ListTray open={trayOpen} onClose={() => setTrayOpen(false)} />
             </div>
 
@@ -267,6 +291,7 @@ export const MainLayout = () => {
             <PreviewModal />
             <DeleteQueueModal open={deleteQueueOpen} onOpenChange={setDeleteQueueOpen} />
             <MoveQueueManagerModal open={moveQueueManagerOpen} onOpenChange={setMoveQueueManagerOpen} />
+            <FavouritesManagerModal open={favouritesOpen} onOpenChange={setFavouritesOpen} />
         </div>
     );
 };

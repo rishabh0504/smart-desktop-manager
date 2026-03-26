@@ -186,6 +186,11 @@ pub async fn find_duplicates<R: Runtime>(
                 .unwrap_or_default();
             if settings.blocked_extensions.contains(&ext.to_string()) { continue; }
 
+            // Apply category filter (Images, Video, etc.)
+            if !settings.preview_enabled.is_extension_enabled(&ext) {
+                continue;
+            }
+
             let meta = match path.metadata() { Ok(m) => m, Err(_) => continue };
             let size = meta.len();
             if size == 0 { continue; } // zero-byte files are always "equal" — skip
