@@ -1,588 +1,542 @@
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-} from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
-import { Button } from "@/components/ui/button";
-import { useSettingsStore } from "@/stores/settingsStore";
-import { Eye, EyeOff, Shield, Image, Video, Music, FileText, FileSearch, Trash2, Plus, LayoutGrid, Settings2, ScanSearch, Archive, Palette, Check, Monitor, Search, Eraser } from "lucide-react";
-import { useState, useEffect } from "react";
-import { Input } from "@/components/ui/input";
+import { useState } from "react";
+import { 
+    X, 
+    Shield, 
+    Eye, 
+    EyeOff, 
+    Check, 
+    Palette, 
+    FileSearch, 
+    FileText,
+    ScanSearch, 
+    Plus, 
+    LayoutGrid, 
+    Settings2, 
+    MonitorDot,
+    Monitor as MonitorIcon, 
+    Lock, 
+    Image, 
+    Video, 
+    Music, 
+    BookOpen, 
+    Archive,
+    Search,
+    Eraser
+} from "lucide-react";
 import { cn } from "@/lib/utils";
-
+import { useSettingsStore } from "@/stores/settingsStore";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { ConfigSection } from "@/types/explorer";
 
 interface SettingsDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
 }
 
-type SettingsSection = "explorer" | "dedupe" | "content_search" | "clean" | "appearance";
+const SETTINGS_TAB_LABELS: Record<"explorer" | "dedupe" | "search" | "clean" | "theme", string> = {
+    explorer: "Explorer",
+    dedupe: "Deduplication",
+    search: "Content Search",
+    clean: "Cleaner",
+    theme: "Appearance",
+};
 
-export const SettingsDialog = ({ open, onOpenChange }: SettingsDialogProps) => {
-    const [activeSection, setActiveSection] = useState<SettingsSection>("explorer");
-    const grid_thumbnail_width = useSettingsStore((state) => state.grid_thumbnail_width);
-    const grid_thumbnail_height = useSettingsStore((state) => state.grid_thumbnail_height);
-    const updateGridThumbnailSize = useSettingsStore((state) => state.updateGridThumbnailSize);
+export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+    const { settings, updateSettings, updatePreviewSettings, addBlockedExtension, removeBlockedExtension, addBlockedName, removeBlockedName, updateTheme } = useSettingsStore();
+    const [activeTab, setActiveTab] = useState<"explorer" | "dedupe" | "search" | "clean" | "theme">("explorer");
 
-    const [widthInput, setWidthInput] = useState<string>("");
-    const [heightInput, setHeightInput] = useState<string>("");
+    if (!open) return null;
 
-    const syncGridInputsFromStore = () => {
-        setWidthInput(String(grid_thumbnail_width));
-        setHeightInput(String(grid_thumbnail_height));
-    };
+    const tabs = [
+        { id: "explorer", label: "Explorer", icon: <LayoutGrid className="w-4 h-4" /> },
+        { id: "dedupe", label: "Deduplication", icon: <ScanSearch className="w-4 h-4" /> },
+        { id: "search", label: "Content Search", icon: <Search className="w-4 h-4" /> },
+        { id: "clean", label: "Cleaner", icon: <Eraser className="w-4 h-4" /> },
+        { id: "theme", label: "Appearance", icon: <Palette className="w-4 h-4" /> },
+    ];
 
-    useEffect(() => {
-        if (open) syncGridInputsFromStore();
-    }, [open, grid_thumbnail_width, grid_thumbnail_height]);
-
-    const commitWidth = () => {
-        const n = Number(widthInput);
-        const parsed = Number.isFinite(n) ? Math.min(400, Math.max(20, Math.round(n))) : 30;
-        updateGridThumbnailSize(parsed, grid_thumbnail_height);
-        setWidthInput(String(parsed));
-    };
-
-    const commitHeight = () => {
-        const n = Number(heightInput);
-        const parsed = Number.isFinite(n) ? Math.min(400, Math.max(20, Math.round(n))) : 30;
-        updateGridThumbnailSize(grid_thumbnail_width, parsed);
-        setHeightInput(String(parsed));
-    };
+    const currentSectionSettings = activeTab !== "theme" 
+        ? settings[activeTab === "search" ? "content_search" : activeTab] 
+        : null;
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-3xl p-0 h-[500px] flex flex-row overflow-hidden">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div
+                className="absolute inset-0 bg-background/80 backdrop-blur-md animate-in fade-in duration-300 pointer-events-auto"
+                onClick={() => onOpenChange(false)}
+            />
+            <div className="relative w-full max-w-4xl h-[650px] bg-card border border-border shadow-2xl rounded-2xl flex overflow-hidden animate-in zoom-in-95 duration-300 pointer-events-auto">
                 {/* Sidebar */}
-                <div className="w-56 bg-muted/30 border-r flex flex-col p-2 gap-1">
-                    <div className="px-3 py-4">
-                        <h2 className="text-sm font-bold tracking-tight">Settings</h2>
+                <div className="w-64 bg-muted/30 border-r border-border/50 flex flex-col">
+                    <div className="p-6 border-b border-border/50">
+                        <div className="flex items-center gap-2 mb-1">
+                            <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
+                                <Settings2 className="w-4 h-4" />
+                            </div>
+                            <h2 className="text-sm font-bold tracking-tight">SDM Settings</h2>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-medium opacity-60">Control Center</p>
                     </div>
-                    <SidebarItem
-                        label="Explorer"
-                        icon={<Settings2 className="w-4 h-4" />}
-                        active={activeSection === "explorer"}
-                        onClick={() => setActiveSection("explorer")}
-                    />
-                    <SidebarItem
-                        label="Deduplication"
-                        icon={<ScanSearch className="w-4 h-4" />}
-                        active={activeSection === "dedupe"}
-                        onClick={() => setActiveSection("dedupe")}
-                    />
-                    <SidebarItem
-                        label="Content Search"
-                        icon={<Search className="w-4 h-4" />}
-                        active={activeSection === "content_search"}
-                        onClick={() => setActiveSection("content_search")}
-                    />
-                    <SidebarItem
-                        label="Clean View"
-                        icon={<Eraser className="w-4 h-4" />}
-                        active={activeSection === "clean"}
-                        onClick={() => setActiveSection("clean")}
-                    />
-                    <div className="flex-1" />
-                    <Separator className="my-1 opacity-50" />
-                    <SidebarItem
-                        label="Appearance"
-                        icon={<Palette className="w-4 h-4" />}
-                        active={activeSection === "appearance"}
-                        onClick={() => setActiveSection("appearance")}
-                    />
+
+                    <nav className="flex-1 p-3 space-y-1">
+                        {tabs.map((tab) => (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id as any)}
+                                className={cn(
+                                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all group relative",
+                                    activeTab === tab.id
+                                        ? "bg-primary text-primary-foreground shadow-md shadow-primary/20 scale-[1.02]"
+                                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                )}
+                            >
+                                <span className={cn(
+                                    "transition-transform duration-200",
+                                    activeTab === tab.id ? "scale-110" : "group-hover:scale-110"
+                                )}>{tab.icon}</span>
+                                {tab.label}
+                                {activeTab === tab.id && (
+                                    <div className="absolute right-3 w-1.5 h-1.5 rounded-full bg-primary-foreground/40 animate-pulse" />
+                                )}
+                            </button>
+                        ))}
+                    </nav>
+
+                    <div className="p-4 border-t border-border/50 bg-muted/20 space-y-3">
+                        <button
+                            onClick={() => {
+                                if (confirm("Are you sure you want to reset all settings to defaults?")) {
+                                    (useSettingsStore.getState() as any).resetSettings();
+                                }
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all border border-transparent hover:border-destructive/20"
+                        >
+                            <Eraser className="w-3.5 h-3.5" />
+                            Reset to Defaults
+                        </button>
+                        
+                        <div className="flex items-center gap-3 p-3 rounded-xl bg-background/50 border border-border/50">
+                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                                <MonitorDot className="w-4 h-4 text-primary" />
+                            </div>
+                            <div className="flex-1 overflow-hidden">
+                                <p className="text-[11px] font-bold truncate">System Active</p>
+                                <p className="text-[9px] text-muted-foreground truncate uppercase font-medium">V2.4.0 High-Performance</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 flex flex-col min-w-0">
-                    <DialogHeader className="px-6 pt-6 pb-2">
-                        <DialogTitle>
-                            {activeSection === "explorer" ? "Explorer Settings" :
-                                activeSection === "dedupe" ? "Deduplication Settings" :
-                                    activeSection === "content_search" ? "Content Search Settings" :
-                                        activeSection === "clean" ? "Clean View Settings" :
-                                            "Appearance Settings"}
-                        </DialogTitle>
-                        <DialogDescription>
-                            {activeSection === "explorer"
-                                ? "Configure how you browse and preview files."
-                                : activeSection === "dedupe"
-                                    ? "Adjust filters and behavior for duplicate detection."
-                                    : activeSection === "content_search"
-                                        ? "Adjust categories and filters for content search."
-                                        : "Customize the look and feel of your workspace."
-                            }
-                        </DialogDescription>
-                    </DialogHeader>
+                <div className="flex-1 flex flex-col min-w-0 bg-card/50">
+                    <header className="h-[72px] px-8 border-b border-border/50 flex items-center justify-between bg-card/50 backdrop-blur-sm">
+                        <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm font-bold">{SETTINGS_TAB_LABELS[activeTab]}</span>
+                                <div className="h-1 w-1 rounded-full bg-primary/40" />
+                                <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Parameters</span>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => onOpenChange(false)}
+                            className="p-2 rounded-xl hover:bg-muted text-muted-foreground transition-all duration-200 hover:rotate-90 hover:scale-110"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                    </header>
 
-                    <div className="flex-1 overflow-y-auto px-6 py-4 space-y-8">
-                        {activeSection === "explorer" || activeSection === "dedupe" || activeSection === "content_search" || activeSection === "clean" ? (
-                            <ConfigSectionView section={activeSection} />
-                        ) : activeSection === "appearance" ? (
-                            <AppearanceSectionView />
-                        ) : null}
+                    <ScrollArea className="flex-1">
+                        <div className="p-10 max-w-2xl mx-auto">
+                            {activeTab === "theme" ? (
+                                <ThemeSettingsView settings={settings.theme} onUpdate={updateTheme} />
+                            ) : (
+                                <ConfigSectionView
+                                    section={activeTab === "search" ? "content_search" : activeTab}
+                                    settings={currentSectionSettings as ConfigSection}
+                                    updateSettings={updateSettings}
+                                    updatePreviewSettings={updatePreviewSettings}
+                                    addBlockedExtension={addBlockedExtension}
+                                    removeBlockedExtension={removeBlockedExtension}
+                                    addBlockedName={addBlockedName}
+                                    removeBlockedName={removeBlockedName}
+                                />
+                            )}
+                        </div>
+                    </ScrollArea>
+                </div>
+            </div>
+        </div>
+    );
+}
 
-                        {activeSection === "explorer" && (
-                            <section className="space-y-3">
-                                <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                                    <LayoutGrid className="w-3 h-3" /> Grid view thumbnail size
-                                </h3>
-                                <p className="text-[10px] text-muted-foreground">
-                                    Width and height (px) of the content preview in grid view.
-                                </p>
-                                <div className="grid grid-cols-2 gap-3 max-w-[240px]">
-                                    <div>
-                                        <label className="text-[9px] font-medium text-muted-foreground block mb-1">Width (px)</label>
-                                        <Input
-                                            type="number"
-                                            value={widthInput}
-                                            onChange={(e) => setWidthInput(e.target.value)}
-                                            onBlur={commitWidth}
-                                            onKeyDown={(e) => e.key === "Enter" && commitWidth()}
-                                            className="h-8 text-xs"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-[9px] font-medium text-muted-foreground block mb-1">Height (px)</label>
-                                        <Input
-                                            type="number"
-                                            value={heightInput}
-                                            onChange={(e) => setHeightInput(e.target.value)}
-                                            onBlur={commitHeight}
-                                            onKeyDown={(e) => e.key === "Enter" && commitHeight()}
-                                            className="h-8 text-xs"
-                                        />
+function ThemeSettingsView({ settings, onUpdate }: { settings: any, onUpdate: any }) {
+    return (
+        <div className="space-y-8">
+            <section className="space-y-6">
+                <div>
+                    <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
+                        <MonitorIcon className="w-4 h-4 text-primary" /> Appearance
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground">Customize how the application looks.</p>
+                </div>
+
+                <div className="grid gap-4">
+                    <div className="flex items-center justify-between p-4 rounded-xl bg-muted/40 border border-border/50">
+                        <div className="space-y-0.5">
+                            <span className="text-[13px] font-medium">Custom Brand Color</span>
+                            <p className="text-[11px] text-muted-foreground">Override the default primary color.</p>
+                        </div>
+                        <button
+                            onClick={() => onUpdate({ use_custom_color: !settings.use_custom_color })}
+                            className={cn(
+                                "relative w-11 h-6 rounded-full transition-colors duration-200 outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-primary",
+                                settings.use_custom_color ? "bg-primary" : "bg-muted-foreground/30"
+                            )}
+                        >
+                            <span className={cn(
+                                "absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform duration-200 flex items-center justify-center",
+                                settings.use_custom_color && "translate-x-5"
+                            )}>
+                                {settings.use_custom_color && <Check className="w-3 h-3 text-primary" />}
+                            </span>
+                        </button>
+                    </div>
+
+                    {settings.use_custom_color && (
+                        <div className="p-4 rounded-xl bg-muted/40 border border-border/50 animate-in zoom-in-95 duration-200">
+                            <label className="text-[13px] font-medium mb-3 block">Primary Hex Color</label>
+                            <div className="flex gap-4 items-center">
+                                <div className="relative group">
+                                    <input
+                                        type="color"
+                                        value={settings.custom_color}
+                                        onChange={(e) => onUpdate({ custom_color: e.target.value })}
+                                        className="w-12 h-12 rounded-lg cursor-pointer bg-transparent border-none p-0 overflow-hidden"
+                                    />
+                                    <div className="absolute inset-0 rounded-lg ring-2 ring-primary/20 pointer-events-none group-hover:ring-primary/40 transition-all" />
+                                </div>
+                                <div className="flex-1 space-y-1.5">
+                                    <Input
+                                        value={settings.custom_color}
+                                        onChange={(e) => onUpdate({ custom_color: e.target.value })}
+                                        className="h-9 text-xs font-mono uppercase tracking-wider"
+                                        placeholder="#000000"
+                                    />
+                                    <div className="flex gap-1.5">
+                                        {['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'].map((c) => (
+                                            <button
+                                                key={c}
+                                                onClick={() => onUpdate({ custom_color: c })}
+                                                className={cn(
+                                                    "w-5 h-5 rounded-full border-2 transition-transform hover:scale-110",
+                                                    settings.custom_color === c ? "border-foreground scale-110" : "border-transparent"
+                                                )}
+                                                style={{ backgroundColor: c }}
+                                            />
+                                        ))}
                                     </div>
                                 </div>
-                            </section>
-                        )}
-                    </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
-            </DialogContent>
-        </Dialog>
+            </section>
+        </div>
     );
-};
+}
 
-const SidebarItem = ({ label, icon, active, onClick }: { label: string, icon: React.ReactNode, active: boolean, onClick: () => void }) => (
-    <button
-        onClick={onClick}
-        className={cn(
-            "flex items-center gap-3 px-3 py-2 rounded-md text-xs font-medium transition-colors",
-            active ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-muted text-muted-foreground hover:text-foreground"
-        )}
-    >
-        {icon}
-        {label}
-    </button>
-);
-
-const ConfigSectionView = ({ section }: { section: "explorer" | "dedupe" | "content_search" | "clean" }) => {
-    const settings = useSettingsStore((state) => state.settings[section]);
-    const updateSettings = useSettingsStore((state) => state.updateSettings);
-    const updatePreviewSettings = useSettingsStore((state) => state.updatePreviewSettings);
-    const addBlockedExtension = useSettingsStore((state) => state.addBlockedExtension);
-    const removeBlockedExtension = useSettingsStore((state) => state.removeBlockedExtension);
+function ConfigSectionView({ 
+    section, 
+    settings, 
+    updateSettings, 
+    updatePreviewSettings,
+    addBlockedExtension,
+    removeBlockedExtension,
+    addBlockedName,
+    removeBlockedName
+}: {
+    section: "explorer" | "dedupe" | "content_search" | "clean",
+    settings: ConfigSection,
+    updateSettings: any,
+    updatePreviewSettings: any,
+    addBlockedExtension: any,
+    removeBlockedExtension: any,
+    addBlockedName: any,
+    removeBlockedName: any
+}) {
     const [newExt, setNewExt] = useState("");
-
-    const handleAddExt = () => {
-        if (newExt) {
-            addBlockedExtension(section, newExt);
-            setNewExt("");
-        }
-    };
+    const [newName, setNewName] = useState("");
 
     return (
-        <>
-            {/* Visibility Section */}
-            <section className="space-y-3">
-                <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                    <Eye className="w-3 h-3" /> Visibility
-                </h3>
-                <div className="flex gap-2">
-                    <Button
-                        variant={settings.show_hidden_files ? "default" : "outline"}
-                        className="h-9 px-3 gap-2 text-xs"
+        <div className="space-y-10">
+            {/* Visibility Settings */}
+            <section className="space-y-6">
+                <div>
+                    <h3 className="text-sm font-semibold mb-1 flex items-center gap-2 text-primary">
+                        <Eye className="w-4 h-4" /> Visibility
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground italic">Toggle visibility for specific file attributes.</p>
+                </div>
+
+                <div className="grid gap-3">
+                    <button
                         onClick={() => updateSettings(section, { show_hidden_files: !settings.show_hidden_files })}
+                        className={cn(
+                            "flex items-center justify-between p-4 rounded-xl border transition-all duration-200 group text-left",
+                            settings.show_hidden_files
+                                ? "bg-primary/5 border-primary/30 ring-1 ring-primary/10 shadow-sm"
+                                : "bg-muted/30 border-border/50 hover:bg-muted/50"
+                        )}
                     >
-                        {settings.show_hidden_files ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4 opacity-50" />}
-                        Hidden Files
-                    </Button>
-                    <Button
-                        variant={settings.show_system_files ? "default" : "outline"}
-                        className="h-9 px-3 gap-2 text-xs"
+                        <div className="flex items-center gap-4">
+                            <div className={cn(
+                                "p-2.5 rounded-lg border transition-colors",
+                                settings.show_hidden_files ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-border"
+                            )}>
+                                {settings.show_hidden_files ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                            </div>
+                            <div className="space-y-0.5">
+                                <span className="text-[13px] font-semibold">Hidden Files</span>
+                                <p className="text-[11px] text-muted-foreground">Show files that start with a dot (e.g. .env, .git)</p>
+                            </div>
+                        </div>
+                    </button>
+
+                    <button
                         onClick={() => updateSettings(section, { show_system_files: !settings.show_system_files })}
+                        className={cn(
+                            "flex items-center justify-between p-4 rounded-xl border transition-all duration-200 group text-left",
+                            settings.show_system_files
+                                ? "bg-primary/5 border-primary/30 ring-1 ring-primary/10 shadow-sm"
+                                : "bg-muted/30 border-border/50 hover:bg-muted/50"
+                        )}
                     >
-                        <Shield className="w-4 h-4" />
-                        System Files
-                    </Button>
+                        <div className="flex items-center gap-4">
+                            <div className={cn(
+                                "p-2.5 rounded-lg border transition-colors",
+                                settings.show_system_files ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-border"
+                            )}>
+                                <Shield className={cn("w-4 h-4", settings.show_system_files ? "" : "opacity-70")} />
+                            </div>
+                            <div className="space-y-0.5">
+                                <span className="text-[13px] font-semibold">System Paths</span>
+                                <p className="text-[11px] text-muted-foreground">Access OS-specific protected locations (High Risk)</p>
+                            </div>
+                        </div>
+                    </button>
                 </div>
             </section>
 
-            {/* Preview Section */}
-            {section !== "clean" && (
-                <section className="space-y-3">
-                    <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                        <FileSearch className="w-3 h-3" /> Preview & Filtering
+            {/* Allowed Scopes */}
+            <section className="space-y-6">
+                <div>
+                    <h3 className="text-sm font-semibold mb-1 flex items-center gap-2 text-primary">
+                        <FileSearch className="w-4 h-4" /> Allowed Scope
                     </h3>
-                    <div className="flex flex-wrap gap-2">
-                        <PreviewToggle
-                            label="Images"
-                            icon={<Image className="w-4 h-4" />}
-                            active={settings.preview_enabled.image}
-                            onClick={() => updatePreviewSettings(section, { image: !settings.preview_enabled.image })}
-                        />
-                        <PreviewToggle
-                            label="Video"
-                            icon={<Video className="w-4 h-4" />}
-                            active={settings.preview_enabled.video}
-                            onClick={() => updatePreviewSettings(section, { video: !settings.preview_enabled.video })}
-                        />
-                        <PreviewToggle
-                            label="Audio"
-                            icon={<Music className="w-4 h-4" />}
-                            active={settings.preview_enabled.audio}
-                            onClick={() => updatePreviewSettings(section, { audio: !settings.preview_enabled.audio })}
-                        />
-                        <PreviewToggle
-                            label="Text"
-                            icon={<FileText className="w-4 h-4" />}
-                            active={settings.preview_enabled.text}
-                            onClick={() => updatePreviewSettings(section, { text: !settings.preview_enabled.text })}
-                        />
-                        <PreviewToggle
-                            label="Documents"
-                            icon={<FileText className="w-4 h-4" />}
-                            active={settings.preview_enabled.document}
-                            onClick={() => updatePreviewSettings(section, { document: !settings.preview_enabled.document })}
-                        />
-                        <PreviewToggle
-                            label="Archives"
-                            icon={<Archive className="w-4 h-4" />}
-                            active={settings.preview_enabled.archive}
-                            onClick={() => updatePreviewSettings(section, { archive: !settings.preview_enabled.archive })}
-                        />
-                        <PreviewToggle
-                            label="Other"
-                            icon={<LayoutGrid className="w-4 h-4" />}
-                            active={settings.preview_enabled.other}
-                            onClick={() => updatePreviewSettings(section, { other: !settings.preview_enabled.other })}
-                        />
-                    </div>
-                </section>
-            )}
-
-            {/* Performance Filters */}
-            {(section === "explorer" || section === "dedupe" || section === "content_search") && (
-                <div className="space-y-6">
-                    <section className="space-y-3">
-                        <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                            <Trash2 className="w-3 h-3" /> Blocked Extensions
-                        </h3>
-                        <div className="flex gap-2 max-w-[300px]">
-                            <Input
-                                placeholder="Ex: iso, tmp, log"
-                                value={newExt}
-                                onChange={(e) => setNewExt(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleAddExt()}
-                                className="h-8 text-xs"
-                            />
-                            <Button size="sm" className="h-8 px-2" onClick={handleAddExt}>
-                                <Plus className="w-4 h-4" />
-                            </Button>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 mt-2">
-                            {settings.blocked_extensions.map((ext: string) => (
-                                <div key={ext} className="flex items-center gap-1.5 px-2 py-0.5 bg-muted rounded-full text-[10px] border shadow-sm">
-                                    <span>.{ext}</span>
-                                    <button onClick={() => removeBlockedExtension(section, ext)} className="hover:text-destructive transition-colors">
-                                        <Plus className="w-3 h-3 rotate-45" />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    </section>
-
-                    <section className="space-y-3">
-                        <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                            <FileSearch className="w-3 h-3" /> Blocked File Names
-                        </h3>
-                        <p className="text-[10px] text-muted-foreground">
-                            Exclude specific files from being scanned (e.g. LICENSE, README).
-                        </p>
-                        <div className="flex gap-2 max-w-[300px]">
-                            <Input
-                                placeholder="Ex: LICENSE, README.md"
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                        const val = e.currentTarget.value;
-                                        if (val) {
-                                            useSettingsStore.getState().addBlockedName(section, val);
-                                            e.currentTarget.value = "";
-                                        }
-                                    }
-                                }}
-                                className="h-8 text-xs"
-                            />
-                            <Button
-                                size="sm"
-                                className="h-8 px-2"
-                                onClick={(e) => {
-                                    const input = e.currentTarget.previousElementSibling as HTMLInputElement;
-                                    if (input.value) {
-                                        useSettingsStore.getState().addBlockedName(section, input.value);
-                                        input.value = "";
-                                    }
-                                }}
-                            >
-                                <Plus className="w-4 h-4" />
-                            </Button>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 mt-2">
-                            {settings.blocked_names.map((name: string) => (
-                                <div key={name} className="flex items-center gap-1.5 px-2 py-0.5 bg-muted rounded-full text-[10px] border shadow-sm">
-                                    <span>{name}</span>
-                                    <button
-                                        onClick={() => useSettingsStore.getState().removeBlockedName(section, name)}
-                                        className="hover:text-destructive transition-colors"
-                                    >
-                                        <Plus className="w-3 h-3 rotate-45" />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    </section>
-                </div>
-            )}
-            {/* ── Thread Count (dedupe only) ─────────────────────────── */}
-            {section === "dedupe" && (
-                <section className="space-y-3">
-                    <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                        <Settings2 className="w-3 h-3" /> Scan Threads
-                    </h3>
-                    <p className="text-[10px] text-muted-foreground">
-                        Number of CPU threads used for parallel hashing.
-                        Leave blank (or set to 0) to use all logical CPUs automatically.
+                    <p className="text-[11px] text-muted-foreground italic">
+                        {section === "dedupe"
+                            ? "Which categories are included when scanning for duplicates (and preview)."
+                            : "Choose which file types to recognize."}
                     </p>
-                    <div className="flex items-center gap-3 max-w-[200px]">
-                        <Input
-                            type="number"
-                            min={0}
-                            max={64}
-                            value={settings.thread_count ?? ""}
-                            placeholder="Auto"
-                            onChange={(e) => {
-                                const raw = e.target.value;
-                                if (raw === "" || raw === "0") {
-                                    updateSettings(section, { thread_count: undefined });
-                                } else {
-                                    const n = Math.max(1, Math.min(64, Math.round(Number(raw))));
-                                    if (Number.isFinite(n)) updateSettings(section, { thread_count: n });
-                                }
-                            }}
-                            className="h-8 text-xs"
-                        />
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 px-3 text-[11px]"
-                            onClick={() => updateSettings(section, { thread_count: undefined })}
-                        >
-                            Auto
-                        </Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    <PreviewToggle
+                        label="Images"
+                        icon={<Image className="w-4 h-4" />}
+                        active={settings.preview_enabled.image}
+                        onClick={() => updatePreviewSettings(section, { image: !settings.preview_enabled.image })}
+                    />
+                    <PreviewToggle
+                        label="Video"
+                        icon={<Video className="w-4 h-4" />}
+                        active={settings.preview_enabled.video}
+                        onClick={() => updatePreviewSettings(section, { video: !settings.preview_enabled.video })}
+                    />
+                    <PreviewToggle
+                        label="Audio"
+                        icon={<Music className="w-4 h-4" />}
+                        active={settings.preview_enabled.audio}
+                        onClick={() => updatePreviewSettings(section, { audio: !settings.preview_enabled.audio })}
+                    />
+                    <PreviewToggle
+                        label="Documents"
+                        icon={<BookOpen className="w-4 h-4" />}
+                        active={settings.preview_enabled.document}
+                        onClick={() => updatePreviewSettings(section, { document: !settings.preview_enabled.document })}
+                    />
+                    <PreviewToggle
+                        label="Compressed"
+                        icon={<Archive className="w-4 h-4" />}
+                        active={settings.preview_enabled.archive}
+                        onClick={() => updatePreviewSettings(section, { archive: !settings.preview_enabled.archive })}
+                    />
+                </div>
+            </section>
+
+            {section === "dedupe" && (
+                <section className="space-y-6">
+                    <div>
+                        <h3 className="text-sm font-semibold mb-1 flex items-center gap-2 text-primary">
+                            <ScanSearch className="w-4 h-4" /> Plain text in duplicate scan
+                        </h3>
+                        <p className="text-[11px] text-muted-foreground italic">
+                            When off (default), .txt, .md, code, JSON, and similar types are skipped in duplicate scans only—usually small on disk.
+                        </p>
                     </div>
-                    {settings.thread_count != null && settings.thread_count > 0 && (
-                        <p className="text-[10px] text-primary font-semibold">
-                            Using {settings.thread_count} thread{settings.thread_count !== 1 ? "s" : ""}
-                        </p>
-                    )}
-                    {(settings.thread_count == null || settings.thread_count === 0) && (
-                        <p className="text-[10px] text-muted-foreground/60">
-                            Using all logical CPUs (auto)
-                        </p>
-                    )}
+                    <button
+                        type="button"
+                        onClick={() =>
+                            updateSettings(section, {
+                                include_plain_text_in_duplicate_scan: !(settings.include_plain_text_in_duplicate_scan ?? false),
+                            })
+                        }
+                        className={cn(
+                            "flex items-center justify-between w-full p-4 rounded-xl border transition-all duration-200 group text-left",
+                            settings.include_plain_text_in_duplicate_scan
+                                ? "bg-primary/5 border-primary/30 ring-1 ring-primary/10 shadow-sm"
+                                : "bg-muted/30 border-border/50 hover:bg-muted/50"
+                        )}
+                    >
+                        <div className="flex items-center gap-4">
+                            <div
+                                className={cn(
+                                    "p-2.5 rounded-lg border transition-colors",
+                                    settings.include_plain_text_in_duplicate_scan
+                                        ? "bg-primary text-primary-foreground border-primary"
+                                        : "bg-muted text-muted-foreground border-border"
+                                )}
+                            >
+                                <FileText className="w-4 h-4" />
+                            </div>
+                            <div className="space-y-0.5 text-left">
+                                <span className="text-[13px] font-semibold">Include plain text &amp; source files</span>
+                                <p className="text-[11px] text-muted-foreground">Scan .txt, .md, .json, code, etc. for duplicates</p>
+                            </div>
+                        </div>
+                    </button>
                 </section>
             )}
-        </>
-    );
-};
 
-const PreviewToggle = ({ label, icon, active, onClick }: { label: string, icon: React.ReactNode, active: boolean, onClick: () => void }) => (
-    <Button
-        variant={active ? "default" : "outline"}
-        className="flex flex-col h-14 w-20 gap-1 p-2 shadow-sm transition-all"
-        onClick={onClick}
-    >
-        {icon}
-        <span className="text-[9px] font-medium">{label}</span>
-    </Button>
-);
-
-const AppearanceSectionView = () => {
-    const theme = useSettingsStore((state) => state.settings.theme);
-    const updateTheme = useSettingsStore((state) => state.updateTheme);
-
-    const presets = [
-        { name: "Blue (Default)", color: "#3b82f6" },
-        { name: "Purple", color: "#a855f7" },
-        { name: "Rose", color: "#f43f5e" },
-        { name: "Amber", color: "#f59e0b" },
-        { name: "Emerald", color: "#10b981" },
-        { name: "Indigo", color: "#6366f1" },
-        { name: "Cyan", color: "#06b6d4" },
-        { name: "Slate", color: "#64748b" },
-    ];
-
-    const gradients = [
-        { name: "Ocean", color: "linear-gradient(to right, #0ea5e9, #2563eb)" },
-        { name: "Sunset", color: "linear-gradient(to right, #f43f5e, #fb923c)" },
-        { name: "Cosmic", color: "linear-gradient(to right, #7c3aed, #db2777)" },
-        { name: "Forest", color: "linear-gradient(to right, #059669, #10b981)" },
-    ];
-
-    return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {/* Theme Selection Type */}
-            <div className="grid grid-cols-2 gap-4">
-                <button
-                    onClick={() => updateTheme({ use_custom_color: false })}
-                    className={cn(
-                        "flex flex-col items-start p-4 rounded-xl border-2 transition-all text-left relative overflow-hidden group",
-                        !theme.use_custom_color ? "border-primary bg-primary/5 shadow-md" : "border-border hover:border-primary/30"
-                    )}
-                >
-                    <div className="flex items-center justify-between w-full mb-3">
-                        <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
-                            <Monitor className="w-5 h-5" />
-                        </div>
-                        {!theme.use_custom_color && (
-                            <div className="bg-primary text-primary-foreground rounded-full p-1">
-                                <Check className="w-3 h-3" />
-                            </div>
-                        )}
-                    </div>
-                    <span className="text-sm font-bold block">Current Theme</span>
-                    <span className="text-[10px] text-muted-foreground mt-1 leading-relaxed">
-                        Default system aesthetic. Clean, professional blue accents.
-                    </span>
-                    {!theme.use_custom_color && (
-                        <div className="absolute bottom-0 right-0 w-12 h-12 bg-primary/10 rounded-tl-full -mr-4 -mb-4 transition-transform group-hover:scale-110" />
-                    )}
-                </button>
-
-                <button
-                    onClick={() => updateTheme({ use_custom_color: true })}
-                    className={cn(
-                        "flex flex-col items-start p-4 rounded-xl border-2 transition-all text-left relative overflow-hidden group",
-                        theme.use_custom_color ? "border-primary bg-primary/5 shadow-md" : "border-border hover:border-primary/30"
-                    )}
-                >
-                    <div className="flex items-center justify-between w-full mb-3">
-                        <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500">
-                            <Palette className="w-5 h-5" />
-                        </div>
-                        {theme.use_custom_color && (
-                            <div className="bg-primary text-primary-foreground rounded-full p-1">
-                                <Check className="w-3 h-3" />
-                            </div>
-                        )}
-                    </div>
-                    <span className="text-sm font-bold block">Custom Theme</span>
-                    <span className="text-[10px] text-muted-foreground mt-1 leading-relaxed">
-                        Personalize with colors or dynamic gradients.
-                    </span>
-                    {theme.use_custom_color && (
-                        <div className="absolute bottom-0 right-0 w-12 h-12 bg-primary/10 rounded-tl-full -mr-4 -mb-4 transition-transform group-hover:scale-110" />
-                    )}
-                </button>
-            </div>
-
-            {theme.use_custom_color && (
-                <div className="space-y-8 animate-in fade-in zoom-in-95 duration-300">
-                    <Separator />
-
-                    <section className="space-y-3">
-                        <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                            <Palette className="w-3 h-3" /> Solid Color Presets
-                        </h3>
-                        <div className="grid grid-cols-4 gap-3">
-                            {presets.map((p) => (
-                                <button
-                                    key={p.color}
-                                    onClick={() => updateTheme({ custom_color: p.color })}
-                                    className={cn(
-                                        "h-12 rounded-xl border-2 transition-all flex items-center justify-center group relative overflow-hidden shadow-sm",
-                                        theme.custom_color === p.color ? "border-primary scale-105" : "border-transparent hover:border-primary/30"
-                                    )}
-                                    style={{ backgroundColor: p.color }}
-                                >
-                                    {theme.custom_color === p.color && (
-                                        <div className="bg-white/20 backdrop-blur-md rounded-full p-1 border border-white/30 shadow-lg">
-                                            <Check className="w-4 h-4 text-white drop-shadow-sm" />
-                                        </div>
-                                    )}
-                                    <div className="absolute inset-0 bg-black/0 hover:bg-black/5 transition-colors" />
-                                </button>
-                            ))}
-                        </div>
-                    </section>
-
-                    <section className="space-y-3">
-                        <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                            <LayoutGrid className="w-3 h-3" /> Gradient Presets
-                        </h3>
-                        <div className="grid grid-cols-2 gap-3">
-                            {gradients.map((g) => (
-                                <button
-                                    key={g.color}
-                                    onClick={() => updateTheme({ custom_color: g.color })}
-                                    className={cn(
-                                        "h-14 rounded-xl border-2 transition-all flex items-center justify-between px-4 group shadow-sm",
-                                        theme.custom_color === g.color ? "border-primary scale-[1.02]" : "border-transparent hover:border-primary/30"
-                                    )}
-                                    style={{ background: g.color }}
-                                >
-                                    <span className="text-xs font-bold text-white drop-shadow-md">{g.name}</span>
-                                    {theme.custom_color === g.color && (
-                                        <div className="bg-white/20 backdrop-blur-md rounded-full p-1 border border-white/30 shadow-lg">
-                                            <Check className="w-4 h-4 text-white drop-shadow-sm" />
-                                        </div>
-                                    )}
-                                </button>
-                            ))}
-                        </div>
-                    </section>
-
-                    <section className="space-y-3">
-                        <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                            <Settings2 className="w-3 h-3" /> Custom Hex or CSS Value
-                        </h3>
-                        <div className="flex gap-3">
-                            <div className="relative flex-1">
-                                <Input
-                                    value={theme.custom_color}
-                                    onChange={(e) => updateTheme({ custom_color: e.target.value })}
-                                    className="h-10 text-xs pl-12 font-mono rounded-xl bg-muted/50 border-none shadow-inner"
-                                    placeholder="#hex or linear-gradient(...)"
-                                />
-                                <div
-                                    className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg shadow-md border border-white/20"
-                                    style={{ background: theme.custom_color }}
-                                />
-                            </div>
-                            <Button
-                                variant="outline"
-                                className="h-10 px-4 rounded-xl hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all"
-                                onClick={() => updateTheme({ custom_color: "#3b82f6" })}
-                            >
-                                Reset to Blue
-                            </Button>
-                        </div>
-                    </section>
+            {/* Ignored Items */}
+            <section className="space-y-6">
+                <div>
+                    <h3 className="text-sm font-semibold mb-1 flex items-center gap-2 text-primary">
+                        <Lock className="w-4 h-4" /> Global Exclusions
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground italic">Force-skip specific criteria app-wide.</p>
                 </div>
-            )}
+                
+                <div className="space-y-4">
+                    <BlockedList
+                        title="Blocked Extensions"
+                        description="Extensions to ignore even if type is enabled"
+                        items={settings.blocked_extensions}
+                        newItem={newExt}
+                        setNewItem={setNewExt}
+                        onAdd={() => {
+                            if (newExt) {
+                                addBlockedExtension(section, newExt);
+                                setNewExt("");
+                            }
+                        }}
+                        onRemove={(ext) => removeBlockedExtension(section, ext)}
+                        placeholder="e.g. log, tmp"
+                    />
+                    <BlockedList
+                        title="Blocked Names"
+                        description={
+                            section === "dedupe"
+                                ? "Exact basename only (not full paths inside folders)"
+                                : "Exact file/folder names to never process"
+                        }
+                        items={settings.blocked_names}
+                        newItem={newName}
+                        setNewItem={setNewName}
+                        onAdd={() => {
+                            if (newName) {
+                                addBlockedName(section, newName);
+                                setNewName("");
+                            }
+                        }}
+                        onRemove={(name) => removeBlockedName(section, name)}
+                        placeholder="e.g. node_modules, .git"
+                    />
+                </div>
+            </section>
         </div>
     );
-};
+}
 
+function PreviewToggle({ label, icon, active, onClick }: { label: string, icon: any, active: boolean, onClick: () => void }) {
+    return (
+        <button
+            onClick={onClick}
+            className={cn(
+                "flex items-center gap-2 px-3 py-2 rounded-lg border text-[11px] font-medium transition-all duration-200",
+                active
+                    ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20 scale-105"
+                    : "bg-muted/40 text-muted-foreground border-border/50 hover:bg-muted/60 hover:text-foreground hover:border-border"
+            )}
+        >
+            {icon}
+            {label}
+        </button>
+    );
+}
+
+function BlockedList({ title, description, items, newItem, setNewItem, onAdd, onRemove, placeholder }: {
+    title: string,
+    description: string,
+    items: string[],
+    newItem: string,
+    setNewItem: (v: string) => void,
+    onAdd: () => void,
+    onRemove: (item: string) => void,
+    placeholder: string
+}) {
+    return (
+        <div className="p-4 rounded-xl bg-muted/20 border border-border/40">
+            <div className="flex items-center justify-between mb-3">
+                <div className="space-y-0.5">
+                    <span className="text-[13px] font-medium">{title}</span>
+                    <p className="text-[10px] text-muted-foreground">{description}</p>
+                </div>
+                <div className="flex gap-1.5 focus-within:ring-2 focus-within:ring-primary/20 rounded-lg transition-all">
+                    <Input
+                        value={newItem}
+                        onChange={(e) => setNewItem(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && onAdd()}
+                        placeholder={placeholder}
+                        className="h-8 w-32 border-border/50 bg-background/50 text-[11px]"
+                    />
+                    <button
+                        onClick={onAdd}
+                        className="h-8 w-8 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+                    >
+                        <Plus className="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5 min-h-[1.5rem]">
+                {items.length === 0 && (
+                    <p className="text-[10px] text-muted-foreground/50 italic py-1">No items blocked</p>
+                )}
+                {items.map((item) => (
+                    <div
+                        key={item}
+                        className="flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-md bg-muted/50 border border-border/50 text-[10px] group animate-in slide-in-from-right-2 duration-200"
+                    >
+                        <span className="font-medium">{item}</span>
+                        <button
+                            onClick={() => onRemove(item)}
+                            className="p-0.5 rounded-sm hover:bg-destructive hover:text-destructive-foreground opacity-50 group-hover:opacity-100 transition-all"
+                        >
+                            <X className="w-2.5 h-2.5" />
+                        </button>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}

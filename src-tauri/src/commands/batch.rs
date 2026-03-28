@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::fs;
-use std::io::{BufReader, BufWriter, self};
+use std::io::{BufReader, BufWriter, self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Window};
@@ -54,8 +54,6 @@ pub struct BatchFinished {
     pub failed_paths: Vec<String>,
 }
 
-/// Returns only the paths that currently exist on disk.
-/// Used by the frontend to prune queued files that were deleted externally (e.g. via Finder).
 #[tauri::command]
 pub fn check_paths_exist(paths: Vec<String>) -> Vec<String> {
     paths.into_iter()
@@ -73,7 +71,6 @@ pub async fn delete_items(
     let cancel_flag = register_operation(operation_id.clone());
     let processed_count = std::sync::atomic::AtomicUsize::new(0);
     let last_emit = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
-    // Collect failed paths so frontend knows which ones to keep in queue.
     let failed_paths = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
 
     let op_id = operation_id.clone();
@@ -88,10 +85,8 @@ pub async fn delete_items(
 
             let p = PathBuf::from(path);
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
-
             let count = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
 
-            // Throttle bulk progress events (for the progress bar)
             let mut last_emit_lock = last_emit.lock().unwrap();
             if last_emit_lock.elapsed().as_millis() > 100 || count == total_items {
                 let _ = app_clone.emit("batch_progress", BatchProgress {
@@ -105,31 +100,7 @@ pub async fn delete_items(
             }
             drop(last_emit_lock);
 
-            let ok = if p.exists() {
-                if p.is_dir() {
-                    #[cfg(target_os = "macos")]
-                    {
-                        let status = std::process::Command::new("rm")
-                            .arg("-rf")
-                            .arg(&p)
-                            .status();
-                        status.is_ok() && status.unwrap().success()
-                            || std::fs::remove_dir_all(&p).is_ok()
-                    }
-                    #[cfg(not(target_os = "macos"))]
-                    {
-                        std::fs::remove_dir_all(&p).is_ok()
-                    }
-                } else {
-                    std::fs::remove_file(&p).is_ok()
-                }
-            } else {
-                // File doesn't exist — treat as "already gone" = success
-                true
-            };
-
-            if ok {
-                // Notify frontend: this specific item was successfully deleted
+            if trash::delete(&p).is_ok() {
                 let _ = app_clone.emit("batch_item_completed", BatchItemCompleted {
                     operation_id: op_id.clone(),
                     path: path.clone(),
@@ -182,7 +153,6 @@ pub async fn batch_copy(
 
             let count = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
 
-            // Throttle progress events to once every 100ms or for the last item
             let mut last_emit_lock = last_emit.lock().unwrap();
             if last_emit_lock.elapsed().as_millis() > 100 || count == total_items {
                 let _ = app_clone.emit("batch_progress", BatchProgress {
@@ -247,7 +217,6 @@ pub async fn batch_move(
 
             let count = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
 
-            // Throttle progress events
             let mut last_emit_lock = last_emit.lock().unwrap();
             if last_emit_lock.elapsed().as_millis() > 100 || count == total_items {
                 let _ = app_clone.emit("batch_progress", BatchProgress {
@@ -268,7 +237,7 @@ pub async fn batch_move(
                     let mut opts = fs_extra::dir::CopyOptions::new();
                     opts.overwrite = false;
                     if fs_extra::dir::copy(&src_path, &target_path, &opts).is_ok() {
-                        std::fs::remove_dir_all(&src_path).is_ok()
+                        trash::delete(&src_path).is_ok()
                     } else {
                         false
                     }
@@ -284,7 +253,6 @@ pub async fn batch_move(
             };
 
             if ok {
-                // Notify frontend: this specific item was successfully moved
                 let _ = app_clone.emit("batch_item_completed", BatchItemCompleted {
                     operation_id: op_id.clone(),
                     path: src.clone(),
@@ -337,7 +305,6 @@ pub fn fast_copy(src: String, dest: String, window: Window) -> Result<(), String
                 let _ = copy_file(path, &target);
             }
 
-            // report progress
             let progress = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
             let _ = window.emit("copy-progress", Some((progress, total)));
         }

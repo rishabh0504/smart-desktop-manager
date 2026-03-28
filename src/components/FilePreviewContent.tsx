@@ -135,8 +135,9 @@ export const FilePreviewContent = ({ path, extension, name, is_dir, className, s
     const isImage = isImageExtension(ext) && previewSettings.image;
     const isVideo = isVideoExtension(ext) && previewSettings.video;
     const isAudio = isAudioExtension(ext) && previewSettings.audio;
-    const isText = isTextExtension(ext) && previewSettings.text;
+    const isText = isTextExtension(ext) && previewSettings.document;
     const isDocument = isDocumentExtension(ext) && previewSettings.document;
+
 
     const isPreviewEnabled = isImage || isVideo || isAudio || isText || isDocument || is_dir;
 

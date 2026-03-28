@@ -26,6 +26,7 @@ import { useFavouritesStore } from "@/stores/favouritesStore";
 import { FavouritesManagerModal } from "@/components/FavouritesManagerModal";
 import { ThemeApplier } from "@/components/ThemeApplier";
 import { CleanTab } from "@/components/CleanTab";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { ActivityBar } from "@/components/ActivityBar";
 import { PanelLeft, PanelRight } from "lucide-react";
 
@@ -53,6 +54,12 @@ export const MainLayout = () => {
     const [favouritesOpen, setFavouritesOpen] = useState(false);
     const favouritesCount = useFavouritesStore((s) => s.items.length);
 
+
+    const { loadSettings } = useSettingsStore();
+
+    useEffect(() => {
+        loadSettings();
+    }, [loadSettings]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {

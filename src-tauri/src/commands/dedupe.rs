@@ -1,20 +1,31 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::fs::{self, File};
+use std::io::{Read, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{Emitter, Runtime};
-
-#[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
+use walkdir::WalkDir;
+use moka::sync::Cache;
+use lazy_static::lazy_static;
 
 use super::settings::ConfigSection;
+use crate::commands::operation::{register_operation, unregister_operation};
+use crate::utils::path_visibility::is_hidden_or_system;
+use crate::utils::text_like::is_text_like_extension;
+
+lazy_static! {
+    /// Global cache for file hashes to speed up repeated dedupe scans.
+    /// Key: (Path, Size, ModifiedTime) -> Value: Hash string
+    static ref HASH_CACHE: Cache<(String, u64, u64), String> = Cache::builder()
+        .max_capacity(100_000)
+        .time_to_idle(std::time::Duration::from_secs(3600 * 24)) // 24 hours
+        .build();
+}
 
 /// Safety cap to avoid OOM on huge volumes.
 const MAX_DEDUPE_DISCOVERY_FILES: usize = 1_000_000;
@@ -26,6 +37,7 @@ pub struct DuplicateGroup {
     pub hash: String,
     pub size: u64,
     pub paths: Vec<String>,
+    pub modified_times: Vec<u64>,
 }
 
 /// Progress event emitted every ~250 ms on "dedupe-progress".
@@ -51,397 +63,293 @@ pub async fn find_duplicates<R: Runtime>(
     app: tauri::AppHandle<R>,
     paths: Vec<String>,
     settings: ConfigSection,
-) -> Result<Vec<DuplicateGroup>, String> {
-    let start_time = Instant::now();
-
-    // ── Normalise + dedup root paths ─────────────────────────────────────
-    let mut unique_paths: Vec<PathBuf> = paths
-        .into_iter()
-        .map(PathBuf::from)
-        .filter(|p| p.exists())
-        .collect();
-    unique_paths.sort();
-    let mut root_paths: Vec<PathBuf> = Vec::new();
-    for p in unique_paths {
-        if !root_paths.iter().any(|r: &PathBuf| p.starts_with(r)) {
-            root_paths.push(p);
-        }
-    }
-    if root_paths.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // ── Thread count from settings ───────────────────────────────────────
-    let logical_cpus = num_cpus();
-    let num_threads = match settings.thread_count {
-        Some(n) if n >= 1 => n.min(logical_cpus * 2),
-        _ => logical_cpus,
-    };
-
-    // Build a LOCAL Rayon thread pool — never touches the global pool.
-    // Safe to rebuild on every scan, always uses the user-configured count.
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    // ── Shared progress state ────────────────────────────────────────────
-    let scanned_count = Arc::new(AtomicUsize::new(0));
-    let dups_found    = Arc::new(AtomicUsize::new(0));
-    let phase_idx     = Arc::new(AtomicUsize::new(0)); // 0=disc,1=part,2=full,3=done
-    let phase_done    = Arc::new(AtomicUsize::new(0));
-    let phase_total   = Arc::new(AtomicUsize::new(0));
-    let active        = Arc::new(AtomicBool::new(true));
-    let last_path     = Arc::new(Mutex::new(String::new()));
-
-    // ── Background progress emitter ──────────────────────────────────────
-    {
-        let app2      = app.clone();
-        let scanned2  = scanned_count.clone();
-        let dups2     = dups_found.clone();
-        let phase2    = phase_idx.clone();
-        let p_done2   = phase_done.clone();
-        let p_total2  = phase_total.clone();
-        let active2   = active.clone();
-        let path2     = last_path.clone();
-        let start2    = start_time;
-
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                if !active2.load(Ordering::Relaxed) { break; }
-
-                let ph   = phase2.load(Ordering::Relaxed) as u8;
-                let done = p_done2.load(Ordering::Relaxed);
-                let tot  = p_total2.load(Ordering::Relaxed);
-                let sc   = scanned2.load(Ordering::Relaxed);
-                let cur  = path2.lock().map(|g| g.clone()).unwrap_or_default();
-
-                let percent: u8 = match ph {
-                    0 => {
-                        // Discovery — unknown total, animate 0→32 based on files found
-                        if sc == 0 { 0 } else { (sc.min(500_000) * 32 / 500_000) as u8 }
-                    }
-                    1 => (33 + if tot > 0 { done.min(tot) * 33 / tot } else { 0 }) as u8,
-                    2 => (66 + if tot > 0 { done.min(tot) * 33 / tot } else { 0 }) as u8,
-                    _ => 100,
-                };
-
-                let status = match ph {
-                    0 => format!("Discovering files… ({} scanned)", sc),
-                    1 => format!("Quick check ({}/{})", done, tot),
-                    2 => format!("Deep verify ({}/{})", done, tot),
-                    _ => "Done".to_string(),
-                };
-
-                let _ = app2.emit("dedupe-progress", ProgressEvent {
-                    scanned: sc,
-                    duplicates_found: dups2.load(Ordering::Relaxed),
-                    current_path: cur,
-                    status,
-                    percent,
-                    phase: ph,
-                    total_files: tot,
-                    elapsed_ms: start2.elapsed().as_millis() as u64,
-                });
-            }
-        });
-    }
-
-    // ── Phase 1: Discovery ───────────────────────────────────────────────
-    // Walk all root folders serially (I/O bound; parallel walk gives no
-    // speedup when the bottleneck is the storage device).
-    // Collect (size, dev, ino, path) for every file that passes filters.
-
-    #[cfg(unix)]
-    type Identity = (u64, u64, u64); // (size, dev, ino)
-    #[cfg(not(unix))]
-    type Identity = (u64, u64, u64); // (size, 0, 0)
-
-    let mut files_by_identity: HashMap<Identity, Vec<PathBuf>> = HashMap::new();
-
-    for root in &root_paths {
-        for entry in walkdir::WalkDir::new(root)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if scanned_count.load(Ordering::Relaxed) >= MAX_DEDUPE_DISCOVERY_FILES {
-                break;
-            }
-            if !entry.file_type().is_file() { continue; }
-
-            let path = entry.path().to_path_buf();
-            let name = path.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            // Apply name filter
-            if !settings.show_hidden_files && name.starts_with('.') { continue; }
-            if settings.blocked_names.contains(&name) { continue; }
-
-            // Apply extension filter
-            let ext = path.extension()
-                .map(|e| e.to_string_lossy().to_lowercase())
-                .unwrap_or_default();
-            if settings.blocked_extensions.contains(&ext.to_string()) { continue; }
-
-            // Apply category filter (Images, Video, etc.)
-            if !settings.preview_enabled.is_extension_enabled(&ext) {
-                continue;
-            }
-
-            let meta = match path.metadata() { Ok(m) => m, Err(_) => continue };
-            let size = meta.len();
-            if size == 0 { continue; } // zero-byte files are always "equal" — skip
-
-            #[cfg(unix)]
-            let key: Identity = (size, meta.dev(), meta.ino());
-            #[cfg(not(unix))]
-            let key: Identity = (size, 0, 0);
-
-            scanned_count.fetch_add(1, Ordering::Relaxed);
-            if let Ok(mut g) = last_path.lock() { *g = path.to_string_lossy().to_string(); }
-
-            files_by_identity.entry(key).or_default().push(path);
-        }
-    }
-
-    // ── Filter: only sizes with ≥2 files need hashing ───────────────────
-    // Group by size only (drop inode-duplicate paths — hardlinks are already
-    // the same bytes, treat them as duplicates only if >1 path per inode).
-    let mut items_to_partial_hash: Vec<(u64, PathBuf)> = Vec::new();
-    let mut hardlink_groups: Vec<DuplicateGroup> = Vec::new();
-
-    // First, group by (size) ignoring inode
-    let mut by_size: HashMap<u64, Vec<(u64, u64, PathBuf)>> = HashMap::new();
-    for ((size, dev, ino), paths) in files_by_identity {
-        for path in paths {
-            by_size.entry(size).or_default().push((dev, ino, path));
-        }
-    }
-
-    for (size, entries) in by_size {
-        if entries.len() < 2 { continue; }
-
-        // Separate hard-links from distinct inodes
-        let mut inode_map: HashMap<(u64, u64), Vec<PathBuf>> = HashMap::new();
-        for (dev, ino, path) in entries {
-            inode_map.entry((dev, ino)).or_default().push(path);
-        }
-
-        let mut non_hardlink: Vec<PathBuf> = Vec::new();
-        for (_, group_paths) in inode_map {
-            if group_paths.len() > 1 {
-                // Hard-links are trivially duplicates
-                hardlink_groups.push(DuplicateGroup {
-                    hash: "hard-link".to_string(),
-                    size,
-                    paths: group_paths.into_iter().map(|p| p.to_string_lossy().to_string()).collect(),
-                });
-            } else {
-                non_hardlink.extend(group_paths);
-            }
-        }
-        if non_hardlink.len() >= 2 {
-            for p in non_hardlink {
-                items_to_partial_hash.push((size, p));
-            }
-        }
-    }
-
-    // Emit hard-link groups immediately
-    dups_found.store(hardlink_groups.len(), Ordering::Relaxed);
-    for g in &hardlink_groups {
-        let _ = app.emit("duplicate-found", g.clone());
-    }
-
-    // ── Phase 2: Partial hash (first+last 64 KB) ─────────────────────────
-    phase_idx.store(1, Ordering::Relaxed);
-    phase_done.store(0, Ordering::Relaxed);
-    let total_candidates = items_to_partial_hash.len();
-    phase_total.store(total_candidates, Ordering::Relaxed);
-
-    if total_candidates == 0 {
-        active.store(false, Ordering::Relaxed);
-        emit_done(&app, &start_time, hardlink_groups.len())?;
-        return Ok(hardlink_groups);
-    }
-
-    type PartialKey = (u64, String); // (size, partial_hash_hex)
-    let p_done_ph1 = phase_done.clone();
-    let last_path_ph1 = last_path.clone();
-
-    let partial_map: HashMap<PartialKey, Vec<PathBuf>> = pool.install(|| {
-        items_to_partial_hash
-            .par_iter()
-            .filter_map(|(size, path)| {
-                p_done_ph1.fetch_add(1, Ordering::Relaxed);
-                if let Ok(mut g) = last_path_ph1.lock() {
-                    *g = path.to_string_lossy().to_string();
-                }
-                get_smart_partial_hash(path, *size)
-                    .ok()
-                    .map(|h| ((*size, h), path.clone()))
-            })
-            .fold(
-                HashMap::<PartialKey, Vec<PathBuf>>::new,
-                |mut acc, (key, path)| { acc.entry(key).or_default().push(path); acc },
-            )
-            .reduce(
-                HashMap::new,
-                |mut a, b| { for (k, v) in b { a.entry(k).or_default().extend(v); } a },
-            )
-    });
-
-    // ── Phase 3: Full hash (only groups that share a partial hash) ───────
-    phase_idx.store(2, Ordering::Relaxed);
-    phase_done.store(0, Ordering::Relaxed);
-
-    let confirmed_groups: Vec<(u64, String, Vec<PathBuf>)> = partial_map
-        .into_iter()
-        .filter(|(_, v)| v.len() >= 2)
-        .map(|((size, partial_hash), paths)| (size, partial_hash, paths))
-        .collect();
-
-    let total_to_verify: usize = confirmed_groups.iter().map(|(_, _, p)| p.len()).sum();
-    phase_total.store(total_to_verify, Ordering::Relaxed);
-
-    let p_done_ph2 = phase_done.clone();
-    let dups_ph2   = dups_found.clone();
-    let last_path_ph2 = last_path.clone();
-
-    let final_groups: Vec<DuplicateGroup> = pool.install(|| {
-        confirmed_groups
-            .into_par_iter()
-            .flat_map(|(size, partial_hash, paths)| {
-                // For small files (≤128 KB) the partial hash already covers the entire
-                // file content, so we can use it directly as the full hash.
-                let full_map: HashMap<String, Vec<PathBuf>> = paths
-                    .par_iter()
-                    .filter_map(|path| {
-                        p_done_ph2.fetch_add(1, Ordering::Relaxed);
-                        if let Ok(mut g) = last_path_ph2.lock() {
-                            *g = path.to_string_lossy().to_string();
-                        }
-                        let hash = if size <= 131_072 {
-                            // ≤128 KB: partial hash == full hash
-                            Some(partial_hash.clone())
-                        } else {
-                            get_full_hash(path).ok()
-                        };
-                        hash.map(|h| (h, path.clone()))
-                    })
-                    .fold(
-                        HashMap::<String, Vec<PathBuf>>::new,
-                        |mut acc, (h, p)| { acc.entry(h).or_default().push(p); acc },
-                    )
-                    .reduce(
-                        HashMap::new,
-                        |mut a, b| { for (k, v) in b { a.entry(k).or_default().extend(v); } a },
-                    );
-
-                full_map
-                    .into_iter()
-                    .filter(|(_, v)| v.len() >= 2)
-                    .map(|(hash, paths)| {
-                        dups_ph2.fetch_add(1, Ordering::Relaxed);
-                        DuplicateGroup {
-                            hash,
-                            size,
-                            paths: paths.into_iter().map(|p| p.to_string_lossy().to_string()).collect(),
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    });
-
-    // Emit each confirmed group as it's found
-    for g in &final_groups {
-        let _ = app.emit("duplicate-found", g.clone());
-    }
-
-    active.store(false, Ordering::Relaxed);
-
-    let all: Vec<DuplicateGroup> = hardlink_groups.into_iter().chain(final_groups).collect();
-    emit_done(&app, &start_time, all.len())?;
-    Ok(all)
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-fn num_cpus() -> usize {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-}
-
-fn emit_done<R: Runtime>(
-    app: &tauri::AppHandle<R>,
-    start: &Instant,
-    dups: usize,
 ) -> Result<(), String> {
-    app.emit("dedupe-progress", ProgressEvent {
-        scanned: 0,
-        duplicates_found: dups,
-        current_path: String::new(),
+    let start_time = Instant::now();
+    let _cancel_flag = register_operation("dedupe".to_string());
+    
+    let root_paths: Vec<PathBuf> = paths.into_iter()
+        .map(PathBuf::from)
+        .filter(|p| p.exists() && !is_system_path(p))
+        .collect();
+
+    if root_paths.is_empty() {
+        return Err("No valid paths provided for deduplication".to_string());
+    }
+
+    let scanned_count = Arc::new(AtomicUsize::new(0));
+    let dups_found = Arc::new(AtomicUsize::new(0));
+    let progress_active = Arc::new(AtomicBool::new(true));
+    let last_path_shared = Arc::new(std::sync::Mutex::new(String::new()));
+
+    let phase = Arc::new(std::sync::atomic::AtomicU8::new(0));
+    let percent = Arc::new(std::sync::atomic::AtomicU8::new(0));
+    let total_phase_files = Arc::new(AtomicUsize::new(0));
+
+    let app_handle = app.clone();
+    let scanned_clone = scanned_count.clone();
+    let dups_clone = dups_found.clone();
+    let path_clone = last_path_shared.clone();
+    let active_clone = progress_active.clone();
+    
+    let phase_clone = phase.clone();
+    let percent_clone = percent.clone();
+    let total_clone = total_phase_files.clone();
+
+    // Progress emitter thread
+    tokio::spawn(async move {
+        while active_clone.load(Ordering::Relaxed) {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            
+            let current_path = if let Ok(p) = path_clone.lock() { p.clone() } else { String::new() };
+            
+            let _ = app_handle.emit("dedupe-progress", ProgressEvent {
+                scanned: scanned_clone.load(Ordering::Relaxed),
+                duplicates_found: dups_clone.load(Ordering::Relaxed),
+                current_path,
+                status: "Scanning...".to_string(),
+                percent: percent_clone.load(Ordering::Relaxed),
+                phase: phase_clone.load(Ordering::Relaxed),
+                total_files: total_clone.load(Ordering::Relaxed),
+                elapsed_ms: start_time.elapsed().as_millis() as u64,
+            });
+        }
+    });
+
+    let initial_candidates = walk_and_discover(&root_paths, &settings, &scanned_count, &last_path_shared);
+    let potential_groups = group_by_size(initial_candidates);
+    
+    // Phase 1 (Partial Hashing) setup
+    phase.store(1, Ordering::Relaxed);
+    let partial_count: usize = potential_groups.values().map(|v| v.len()).sum();
+    total_phase_files.store(partial_count, Ordering::Relaxed);
+
+    let partial_results = process_partial_hashes(potential_groups, &percent, &last_path_shared);
+    
+    // Phase 2 (Full Hashing) setup
+    phase.store(2, Ordering::Relaxed);
+    let full_count: usize = partial_results.values().map(|v| v.len()).sum();
+    total_phase_files.store(full_count, Ordering::Relaxed);
+
+    let final_groups = process_full_hashes(partial_results, &dups_found, &app, &percent, &last_path_shared);
+
+    progress_active.store(false, Ordering::Relaxed);
+    unregister_operation(&"dedupe".to_string());
+
+    // Final result
+    let _ = app.emit("dedupe-progress", ProgressEvent {
+        scanned: scanned_count.load(Ordering::Relaxed),
+        duplicates_found: final_groups.len(),
+        current_path: "Scan complete".to_string(),
         status: "Done".to_string(),
         percent: 100,
         phase: 3,
         total_files: 0,
-        elapsed_ms: start.elapsed().as_millis() as u64,
-    }).map_err(|e| e.to_string())
+        elapsed_ms: start_time.elapsed().as_millis() as u64,
+    });
+
+    Ok(())
 }
 
-/// Hash the first and last 64 KB of a file.
-/// For files ≤64 KB only the start is hashed.
-/// This is the key speed optimisation — for most duplicate-detection purposes
-/// matching start+end is enough to rule out false positives before the full hash.
-fn get_smart_partial_hash(path: &Path, size: u64) -> Result<String, std::io::Error> {
+fn is_system_path(path: &Path) -> bool {
+    let path_str = path.to_string_lossy();
+    #[cfg(target_os = "macos")]
+    {
+        path_str == "/System" || path_str.starts_with("/System/") ||
+        path_str == "/Library" || path_str.starts_with("/Library/") ||
+        path_str == "/private" || path_str.starts_with("/private/") ||
+        path_str == "/Applications" || path_str.starts_with("/Applications/") ||
+        path_str == "/bin" || path_str == "/usr" || path_str == "/sbin" ||
+        path_str == "/dev" || path_str == "/etc"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let p_upper = path_str.to_uppercase();
+        p_upper.contains("WINDOWS") || p_upper.contains("PROGRAM FILES") ||
+        p_upper.contains("PROGRAM DATA") || p_upper.contains("RECYCLE.BIN") ||
+        p_upper.contains("SYSTEM VOLUME INFORMATION")
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        path_str.starts_with("/proc") || path_str.starts_with("/sys") ||
+        path_str.starts_with("/boot") || path_str.starts_with("/dev")
+    }
+}
+
+fn walk_and_discover(
+    roots: &[PathBuf], 
+    settings: &ConfigSection,
+    count: &AtomicUsize,
+    last_path: &std::sync::Mutex<String>
+) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for root in roots {
+        let walker = WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok());
+            
+        for entry in walker {
+            if files.len() >= MAX_DEDUPE_DISCOVERY_FILES { break; }
+            if !entry.file_type().is_file() { continue; }
+            
+            let path = entry.path().to_path_buf();
+            if is_system_path(&path) { continue; }
+            
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            let name_str = name.to_string();
+            
+            if !settings.show_hidden_files && name.starts_with('.') { continue; }
+            
+            if !settings.show_system_files && is_hidden_or_system(&name_str, &path) {
+                continue;
+            }
+            
+            let extension = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+            if settings.blocked_extensions.contains(&extension) { continue; }
+            if settings.blocked_names.contains(&name_str) { continue; }
+
+            // Filter by 4 core types
+            if !settings.preview_enabled.is_extension_enabled(&extension) { continue; }
+
+            if !settings.include_plain_text_in_duplicate_scan && is_text_like_extension(&extension) {
+                continue;
+            }
+
+            if let Ok(mut p) = last_path.lock() { *p = path.to_string_lossy().to_string(); }
+            count.fetch_add(1, Ordering::Relaxed);
+            files.push(path);
+        }
+    }
+    files
+}
+
+fn group_by_size(files: Vec<PathBuf>) -> HashMap<u64, Vec<PathBuf>> {
+    let mut map: HashMap<u64, Vec<PathBuf>> = HashMap::new();
+    for path in files {
+        if let Ok(meta) = fs::metadata(&path) {
+            let size = meta.len();
+            if size > 0 {
+                map.entry(size).or_default().push(path);
+            }
+        }
+    }
+    map.retain(|_, v| v.len() >= 2);
+    map
+}
+
+fn process_partial_hashes(
+    size_groups: HashMap<u64, Vec<PathBuf>>,
+    percent: &std::sync::atomic::AtomicU8,
+    last_path: &std::sync::Mutex<String>
+) -> HashMap<(u64, String), Vec<PathBuf>> {
+    let mut partial_map: HashMap<(u64, String), Vec<PathBuf>> = HashMap::new();
+    let total_files: usize = size_groups.values().map(|v| v.len()).sum();
+    let mut processed = 0;
+    
+    for (size, paths) in size_groups {
+        for path in paths {
+            if let Ok(mut p) = last_path.lock() { *p = path.to_string_lossy().to_string(); }
+            if let Ok(h) = compute_partial_hash(&path) {
+                partial_map.entry((size, h)).or_default().push(path);
+            }
+            processed += 1;
+            if total_files > 0 {
+                let p_val: u8 = 33 + ((processed as f64 / total_files as f64) * 33.0) as u8;
+                percent.store(p_val, Ordering::Relaxed);
+            }
+        }
+    }
+    partial_map.retain(|_, v| v.len() >= 2);
+    partial_map
+}
+
+fn process_full_hashes<R: Runtime>(
+    partial_groups: HashMap<(u64, String), Vec<PathBuf>>,
+    dups_count: &AtomicUsize,
+    app: &tauri::AppHandle<R>,
+    percent: &std::sync::atomic::AtomicU8,
+    last_path: &std::sync::Mutex<String>
+) -> Vec<DuplicateGroup> {
+    let mut mut_groups = Vec::new();
+    let total_files: usize = partial_groups.values().map(|v| v.len()).sum();
+    let mut processed = 0;
+    
+    for ((size, _), paths) in partial_groups {
+        let mut full_map: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        for path in paths {
+            if let Ok(mut p) = last_path.lock() { *p = path.to_string_lossy().to_string(); }
+            if let Ok(h) = compute_file_hash(&path) {
+                full_map.entry(h).or_default().push(path);
+            }
+            processed += 1;
+            if total_files > 0 {
+                let p_val: u8 = 66 + ((processed as f64 / total_files as f64) * 34.0) as u8;
+                percent.store(p_val, Ordering::Relaxed);
+            }
+        }
+        
+        for (hash, p_list) in full_map {
+            if p_list.len() >= 2 {
+                dups_count.fetch_add(1, Ordering::Relaxed);
+                
+                let modified_times = p_list.iter().map(|p| {
+                    p.metadata().ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                }).collect();
+
+                let group = DuplicateGroup {
+                    hash: hash.clone(),
+                    size,
+                    paths: p_list.iter().map(|p| p.to_string_lossy().to_string()).collect(),
+                    modified_times,
+                };
+                let _ = app.emit("duplicate-found", group.clone());
+                mut_groups.push(group);
+            }
+        }
+    }
+    mut_groups
+}
+
+fn compute_partial_hash(path: &Path) -> std::io::Result<String> {
     let mut file = File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 65536]; // 64 KB
-
-    // Hash start
-    let n1 = file.read(&mut buffer)?;
-    hasher.update(&buffer[..n1]);
-
-    // Hash end (only if file is large enough to have a different end section)
-    if size > 65536 {
-        let seek_pos = if size > 131072 { size - 65536 } else { 65536 };
-        file.seek(SeekFrom::Start(seek_pos))?;
-        let n2 = file.read(&mut buffer)?;
-        hasher.update(&buffer[..n2]);
-    }
-
-    Ok(hex::encode(hasher.finalize()))
+    let mut buffer = [0u8; 16384];
+    let n = file.read(&mut buffer)?;
+    let hash = Sha256::digest(&buffer[..n]);
+    Ok(hex::encode(hash))
 }
 
-/// Full content hash. Uses mmap for large files for zero-copy performance.
-fn get_full_hash(path: &Path) -> Result<String, std::io::Error> {
+fn compute_file_hash(path: &Path) -> std::io::Result<String> {
+    let metadata = fs::metadata(path)?;
+    let size = metadata.len();
+    let mtime = metadata.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let cache_key = (path.to_string_lossy().to_string(), size, mtime);
+    if let Some(cached_hash) = HASH_CACHE.get(&cache_key) {
+        return Ok(cached_hash);
+    }
+
     let file = File::open(path)?;
-    let meta = file.metadata()?;
-    if meta.len() == 0 {
-        return Ok(hex::encode(Sha256::digest(b"")));
-    }
-
-    // Use memory-mapped I/O for large files — the OS handles paging efficiently.
-    if meta.len() > 512 * 1024 {
-        // SAFETY: we only read from this mapping; no mutation.
-        let mmap = unsafe { memmap2::Mmap::map(&file)? };
-        return Ok(hex::encode(Sha256::digest(&mmap[..])));
-    }
-
-    // Small files: sequential buffered read
-    use std::io::BufReader;
-    let mut reader = BufReader::with_capacity(131_072, file);
+    let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
-    let mut buf = [0u8; 131_072];
+    let mut buffer = [0; 65536];
+
     loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 { break; }
-        hasher.update(&buf[..n]);
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
     }
-    Ok(hex::encode(hasher.finalize()))
+
+    let hash = hex::encode(hasher.finalize());
+    HASH_CACHE.insert(cache_key, hash.clone());
+    Ok(hash)
 }

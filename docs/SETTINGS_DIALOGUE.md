@@ -18,11 +18,12 @@ The core functionality relies on `useSettingsStore` allowing configuration choic
 To prevent massive duplication of code, all functional settings tabs (Explorer, Dedupe, Content Search, Clean) render the same generic `<ConfigSectionView section={activeSection} />` component. The component maps directly to the active `section` namespace in Zustand.
 
 Features managed here include:
-- **System Visibility**: Toggles for `show_hidden_files` and `show_system_files`. The backend implicitly respects these booleans when executing `read_dir_chunked` or `find_duplicates`.
-- **Granular Previews**: A grid of `PreviewToggle` buttons (Images, Video, Audio, Text, Documents, Archives). Turning off "Images", for example, prevents the UI from attempting to mount `<img>` payloads in the Preview Drawer natively, saving significant RAM.
+- **System Visibility**: Toggles for `show_hidden_files` and `show_system_files`. Both `read_dir_chunked` and `find_duplicates` respect these flags (system paths use shared visibility rules with [`path_visibility`](src-tauri/src/utils/path_visibility.rs)).
+- **Granular Previews**: A grid of `PreviewToggle` buttons (Images, Video, Audio, Documents, Archives). In the **Deduplication** tab, copy clarifies that these toggles also control **which categories participate in duplicate scans** (and preview).
+- **Deduplication only — Plain text in duplicate scan**: When off (default), plain-text-like extensions (aligned with frontend `TEXT_EXTENSIONS`, plus `.txt`) are **skipped in `find_duplicates` only** to focus cleanup on larger files. Enable to include them.
 - **Exclusion Heuristics**: 
-  - **Blocked Extensions**: Users can input formats (e.g., `.pak`, `.tmp`) to force the Rust backend to completely ignore matching files during its recursive directory walks. 
-  - **Blocked Names**: Users can input exact strings (e.g., `node_modules`, `.git`, `LICENSE`) to prevent entire directories from being ingested into massive background tasks like dupe finding.
+  - **Blocked Extensions**: Ignored even when a type toggle is on.
+  - **Blocked Names**: **Exact basename match only** (e.g. a file literally named `node_modules`), not “everything under a folder with that name” unless that behavior is added separately.
 
 ### 2. Layout Resizing (Explorer Only)
 If the user is situated in the `"explorer"` active tab, a specialized section becomes visible modifying grid parameters.

@@ -61,10 +61,8 @@ export interface PreviewSettings {
     image: boolean;
     video: boolean;
     audio: boolean;
-    text: boolean;
     document: boolean;
     archive: boolean;
-    other: boolean;
 }
 
 export interface ConfigSection {
@@ -73,8 +71,11 @@ export interface ConfigSection {
     show_system_files: boolean;
     blocked_extensions: string[];
     blocked_names: string[];
-    /** Number of worker threads (dedupe). undefined = use all logical CPUs. */
-    thread_count?: number;
+    /**
+     * When false (default), plain-text-like files are skipped by find_duplicates only
+     * (low space impact). Enable to include them in duplicate scans.
+     */
+    include_plain_text_in_duplicate_scan?: boolean;
 }
 
 export interface ThemeSettings {
@@ -96,6 +97,13 @@ export interface TreeNode {
     path: string;
     is_dir: boolean;
     has_children: boolean;
+}
+
+export interface DuplicateGroup {
+    hash: string;
+    size: number;
+    paths: string[];
+    modified_times: number[];
 }
 
 export interface EmptyFolder {

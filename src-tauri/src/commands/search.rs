@@ -19,6 +19,31 @@ pub struct SearchResult {
     pub preview: Option<String>,
 }
 
+fn is_system_path(path: &std::path::Path) -> bool {
+    let path_str = path.to_string_lossy();
+    #[cfg(target_os = "macos")]
+    {
+        path_str == "/System" || path_str.starts_with("/System/") ||
+        path_str == "/Library" || path_str.starts_with("/Library/") ||
+        path_str == "/private" || path_str.starts_with("/private/") ||
+        path_str == "/Applications" || path_str.starts_with("/Applications/") ||
+        path_str == "/bin" || path_str == "/usr" || path_str == "/sbin" ||
+        path_str == "/dev" || path_str == "/etc"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let p_upper = path_str.to_uppercase();
+        p_upper.contains("WINDOWS") || p_upper.contains("PROGRAM FILES") ||
+        p_upper.contains("PROGRAM DATA") || p_upper.contains("RECYCLE.BIN") ||
+        p_upper.contains("SYSTEM VOLUME INFORMATION")
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        path_str.starts_with("/proc") || path_str.starts_with("/sys") ||
+        path_str.starts_with("/boot") || path_str.starts_with("/dev")
+    }
+}
+
 fn walk_builder(root: &str, max_depth: Option<u32>) -> ignore::Walk {
     let mut builder = ignore::WalkBuilder::new(root);
     builder.follow_links(false);
@@ -59,6 +84,7 @@ pub async fn start_file_search(
                 Err(_) => continue,
             };
             let path = entry.path();
+            if is_system_path(path) { continue; }
             let is_dir = path.is_dir();
 
             // Apply item_type filter
@@ -189,6 +215,7 @@ pub async fn start_content_search(
             }
 
             let path = entry.path();
+            if is_system_path(path) { continue; }
             let path_str = path.to_string_lossy().into_owned();
             let name = path
                 .file_name()

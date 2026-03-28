@@ -8,7 +8,8 @@ import { Input } from "./ui/input";
 import {
     Search, Trash2, RefreshCcw, FileText, ChevronRight, Square, CheckSquare,
     CopyCheck, Loader2, Clock, FolderPlus, FolderOpen, ListPlus as ListPlusIcon,
-    ListMinus as ListMinusIcon, FolderInput as FolderInputIcon, X, CheckCheck, Filter
+    ListMinus as ListMinusIcon, FolderInput as FolderInputIcon, X, CheckCheck, Filter,
+    ExternalLink, Bookmark
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -17,6 +18,7 @@ import { useMoveQueueStore } from "@/stores/moveQueueStore";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FilePreviewContent } from "./FilePreviewContent";
+import { filterSameFolderGroup, keeperOptionLabel } from "@/lib/dedupeUtils";
 
 interface DuplicateTabProps {
     tabId: string;
@@ -66,6 +68,10 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
     const deleteSelected = useDedupeStore((s) => s.deleteSelected);
     const sameFolderOnly = useDedupeStore((s) => s.sameFolderOnly);
     const setSameFolderOnly = useDedupeStore((s) => s.setSameFolderOnly);
+    const keeperByHash = useDedupeStore((s) => s.keeperByHash);
+    const setGroupKeeper = useDedupeStore((s) => s.setGroupKeeper);
+    const deleting = useDedupeStore((s) => s.deleting);
+    const deleteBatchProgress = useDedupeStore((s) => s.deleteBatchProgress);
 
     const deleteQueue = useDeleteQueueStore((s) => s.queue);
     const addToDeleteQueue = useDeleteQueueStore((s) => s.addToQueue);
@@ -83,16 +89,9 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
 
     const sameFolderFiltered = useMemo(() => {
         if (!sameFolderOnly) return duplicates;
-        return duplicates.map(g => {
-            const parentGroups: Record<string, string[]> = {};
-            g.paths.forEach(p => {
-                const parent = p.substring(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')));
-                if (!parentGroups[parent]) parentGroups[parent] = [];
-                parentGroups[parent].push(p);
-            });
-            const filteredPaths = Object.values(parentGroups).filter(pl => pl.length > 1).flat();
-            return { ...g, paths: filteredPaths };
-        }).filter(g => g.paths.length > 1);
+        return duplicates
+            .map((g) => filterSameFolderGroup(g))
+            .filter((g): g is NonNullable<typeof g> => g != null);
     }, [duplicates, sameFolderOnly]);
 
     const filteredDuplicates = useMemo(() => {
@@ -161,8 +160,10 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
         getScrollElement: () => scrollRef.current,
         estimateSize: (i) => {
             const g = filteredDuplicates[i];
-            if (g && expandedGroups.has(String(g.hash))) return 44 + g.paths.length * 32 + 8;
-            return 52;
+            // Group: keeper row (~40) + header (~44) + optional expanded file rows
+            const keeperAndHeader = 88;
+            if (g && expandedGroups.has(String(g.hash))) return keeperAndHeader + g.paths.length * 34 + 12;
+            return keeperAndHeader + 8;
         },
         overscan: 10,
     });
@@ -182,13 +183,13 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
     }, [progress]);
 
     return (
-        <div className="flex h-full bg-background border rounded-xl overflow-hidden transition-colors shadow-sm">
+        <div className="flex h-full bg-background border rounded-xl overflow-hidden transition-colors shadow-sm ring-1 ring-border/40">
             {/* ── Main list column ─────────────────────────────────────────── */}
-            <div className="flex-1 flex flex-col min-w-0 border-r overflow-hidden">
-                {/* Header */}
+            <div className="flex-1 flex flex-col min-w-0 border-r border-border/60 overflow-hidden bg-card/20">
+                {/* Zone: title + scan actions */}
                 <div className={cn(
-                    "shrink-0 px-4 pt-4 pb-3 border-b flex flex-col gap-3",
-                    "bg-gradient-to-br from-muted/60 via-muted/30 to-background"
+                    "shrink-0 px-4 pt-4 pb-3 border-b border-border/50 flex flex-col gap-3",
+                    "bg-gradient-to-br from-muted/50 via-muted/25 to-card/80"
                 )}>
                     {/* Title row */}
                     <div className="flex items-center justify-between gap-2">
@@ -218,16 +219,16 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                             {formatSize(wastedBytes)} wasted
                                         </div>
                                     )}
-                                    <Button variant="outline" size="sm" className="h-7 px-2.5 text-[11px] gap-1" onClick={() => startScan()} title="Re-run scan">
+                                    <Button variant="outline" size="sm" className="h-7 px-2.5 text-[11px] gap-1" disabled={deleting} onClick={() => startScan()} title="Re-run scan">
                                         <RefreshCcw className="w-3 h-3" /> Refresh
                                     </Button>
-                                    <Button variant="outline" size="sm" className="h-7 px-2.5 text-[11px] gap-1" onClick={() => resetScan()}>
+                                    <Button variant="outline" size="sm" className="h-7 px-2.5 text-[11px] gap-1" disabled={deleting} onClick={() => resetScan()}>
                                         <Search className="w-3 h-3" /> New Scan
                                     </Button>
                                 </>
                             )}
                             <Button
-                                disabled={scanning || scanQueue.length === 0}
+                                disabled={scanning || deleting || scanQueue.length === 0}
                                 size="sm"
                                 className="h-7 px-3 text-[11px] font-semibold bg-primary text-primary-foreground gap-1.5 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-sm"
                                 onClick={() => startScan()}
@@ -255,8 +256,8 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                         </div>
                     )}
 
-                    {/* Folder queue strip */}
-                    <div className="flex items-center gap-2 bg-background/70 border rounded-lg p-1.5 shadow-xs">
+                    {/* Zone: scan scope — folders */}
+                    <div className="flex items-center gap-2 bg-background/80 border border-border/60 rounded-xl p-2 shadow-sm">
                         <div className="flex items-center gap-1.5 px-1.5 text-muted-foreground shrink-0">
                             <FolderPlus className="w-3.5 h-3.5" />
                             <span className="text-[10px] font-bold uppercase tracking-wider">Folders</span>
@@ -378,10 +379,11 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                 {/* ── Results list ──────────────────────────────────────────── */}
                 {!scanning && duplicates.length > 0 && (
                     <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-                        {/* Toolbar */}
-                        <div className="shrink-0 px-3 py-2 border-b bg-muted/20 flex items-center justify-between gap-2 flex-wrap">
+                        {/* Zone: results toolbar */}
+                        <div className="shrink-0 px-3 py-2.5 border-b border-border/50 bg-muted/25 flex items-center justify-between gap-2 flex-wrap">
                             <div className="flex items-center gap-1">
                                 <Button variant="ghost" size="sm"
+                                    disabled={deleting}
                                     className={cn("h-7 px-2 text-[11px] gap-1.5 hover:bg-primary/10 hover:text-primary")}
                                     onClick={() => selectedPaths.size > 0 ? selectDuplicates("none") : selectDuplicates("all-but-newest", filteredDuplicates)}
                                 >
@@ -392,6 +394,7 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                 </Button>
                                 {duplicates.length > 0 && (
                                     <Button variant="ghost" size="sm"
+                                        disabled={deleting}
                                         className="h-7 px-2 text-[11px] gap-1.5 hover:bg-primary/10 hover:text-primary"
                                         onClick={() => selectDuplicates("all-but-newest", filteredDuplicates)}
                                         title="Keep the newest file in each group, select the rest"
@@ -408,6 +411,7 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                     value={filterQuery}
                                     onChange={e => setFilterQuery(e.target.value)}
                                     placeholder="Filter by name…"
+                                    disabled={deleting}
                                     className="h-7 pl-6 text-[11px] bg-background"
                                 />
                                 {filterQuery && (
@@ -422,12 +426,12 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                 <span className="text-[10px] font-bold text-muted-foreground tabular-nums">{selectedPaths.size} selected</span>
                                 <div className="h-4 w-px bg-border" />
                                 <Button variant="outline" size="sm" className="h-7 px-2 text-[11px] text-destructive hover:bg-destructive/10"
-                                    disabled={selectedPaths.size === 0} onClick={bulkAddToDeleteQueue}>
+                                    disabled={deleting || selectedPaths.size === 0} onClick={bulkAddToDeleteQueue}>
                                     <ListPlusIcon className="w-3.5 h-3.5 mr-1" /> Queue Delete
                                 </Button>
                                 {moveQueues.length > 0 && (
                                     <>
-                                        <Select value={selectedMoveQueueId} onValueChange={setSelectedMoveQueueId}>
+                                        <Select value={selectedMoveQueueId} onValueChange={setSelectedMoveQueueId} disabled={deleting}>
                                             <SelectTrigger className="h-7 w-[110px] text-[11px]">
                                                 <SelectValue placeholder="Move Queue" />
                                             </SelectTrigger>
@@ -438,7 +442,7 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                             </SelectContent>
                                         </Select>
                                         <Button variant="outline" size="sm" className="h-7 px-2 text-[11px] text-primary hover:bg-primary/10"
-                                            disabled={selectedPaths.size === 0 || !selectedMoveQueueId} onClick={bulkAddToMoveQueue}>
+                                            disabled={deleting || selectedPaths.size === 0 || !selectedMoveQueueId} onClick={bulkAddToMoveQueue}>
                                             <FolderInputIcon className="w-3.5 h-3.5 mr-1" /> Queue Move
                                         </Button>
                                     </>
@@ -446,11 +450,25 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                 <div className="h-4 w-px bg-border" />
                                 <Button variant="destructive" size="sm"
                                     className="h-7 px-2 text-[11px] font-semibold shadow-sm shadow-destructive/20"
-                                    disabled={selectedPaths.size === 0} onClick={deleteSelected}>
-                                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+                                    disabled={deleting || selectedPaths.size === 0} onClick={deleteSelected}>
+                                    {deleting ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 mr-1" />} Move to Trash
                                 </Button>
                             </div>
                         </div>
+
+                        {deleting && deleteBatchProgress && (
+                            <div className="shrink-0 px-3 py-2 border-b border-border/50 bg-destructive/5 flex items-center gap-2 min-h-9">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-destructive shrink-0" />
+                                <span className="text-[10px] font-semibold text-muted-foreground tabular-nums">
+                                    Deleting… {deleteBatchProgress.processed} / {deleteBatchProgress.total}
+                                </span>
+                                {deleteBatchProgress.current ? (
+                                    <span className="text-[10px] font-mono truncate text-muted-foreground/80 min-w-0" title={deleteBatchProgress.current}>
+                                        {deleteBatchProgress.current}
+                                    </span>
+                                ) : null}
+                            </div>
+                        )}
 
                         {/* Virtualized list */}
                         <div ref={scrollRef} className="flex-1 overflow-auto min-h-0">
@@ -464,43 +482,51 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                 {virtualizer.getVirtualItems().map(virtualRow => {
                                     const group = filteredDuplicates[virtualRow.index];
                                     if (!group) return null;
-                                    const isExpanded = expandedGroups.has(String(group.hash));
-                                    const groupSelectedCount = group.paths.filter(p => selectedPaths.has(p)).length;
+                                    const hashKey = String(group.hash);
+                                    const isExpanded = expandedGroups.has(hashKey);
+                                    const keeper = keeperByHash[hashKey] ?? group.paths[0];
+                                    const pathsToDelete = group.paths.filter((p) => p !== keeper);
+                                    const deleteSelectedCount = pathsToDelete.filter((p) => selectedPaths.has(p)).length;
+                                    const groupCheckboxChecked =
+                                        pathsToDelete.length > 0 && deleteSelectedCount === pathsToDelete.length;
 
                                     return (
                                         <div
-                                            key={String(group.hash)}
+                                            key={hashKey}
                                             data-index={virtualRow.index}
                                             ref={virtualizer.measureElement}
                                             className="absolute top-0 left-0 w-full px-3 py-1"
                                             style={{ transform: `translateY(${virtualRow.start}px)` }}
                                         >
-                                            <div className="border rounded-lg overflow-hidden bg-card shadow-xs hover:shadow-sm transition-shadow">
-                                                {/* Group header */}
+                                            <div className="border border-border/60 rounded-xl overflow-hidden bg-card shadow-sm hover:shadow-md transition-shadow ring-1 ring-border/30">
+                                                {/* Group header (expand) */}
                                                 <div
                                                     className={cn(
                                                         "flex items-center justify-between px-3 py-2 cursor-pointer select-none transition-colors",
                                                         "border-l-4",
-                                                        groupSelectedCount > 0 ? "border-l-destructive bg-destructive/3 hover:bg-destructive/5" : "border-l-primary/20 bg-muted/20 hover:bg-muted/40"
+                                                        deleteSelectedCount > 0 ? "border-l-destructive bg-destructive/3 hover:bg-destructive/5" : "border-l-primary/25 bg-muted/15 hover:bg-muted/35"
                                                     )}
-                                                    onClick={() => toggleGroup(String(group.hash))}
+                                                    onClick={() => toggleGroup(hashKey)}
                                                 >
                                                     <div className="flex items-center gap-2.5 min-w-0">
                                                         <ChevronRight className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform duration-200 shrink-0", isExpanded && "rotate-90")} />
-                                                        {/* Select all in group checkbox */}
                                                         <Checkbox
-                                                            checked={groupSelectedCount === group.paths.length && group.paths.length > 0}
+                                                            checked={groupCheckboxChecked}
                                                             onCheckedChange={(checked) => {
-                                                                group.paths.forEach(p => {
-                                                                    const inSelection = selectedPaths.has(p);
-                                                                    if (checked && !inSelection) toggleSelection(p);
-                                                                    if (!checked && inSelection) toggleSelection(p);
-                                                                });
+                                                                if (checked) {
+                                                                    pathsToDelete.forEach((p) => {
+                                                                        if (!selectedPaths.has(p)) toggleSelection(p);
+                                                                    });
+                                                                } else {
+                                                                    group.paths.forEach((p) => {
+                                                                        if (selectedPaths.has(p)) toggleSelection(p);
+                                                                    });
+                                                                }
                                                             }}
-                                                            onClick={e => e.stopPropagation()}
+                                                            onClick={(e) => e.stopPropagation()}
                                                             className="w-3.5 h-3.5 data-[state=checked]:bg-destructive data-[state=checked]:border-destructive shrink-0"
                                                         />
-                                                        <div className="p-1 bg-background border rounded-md shadow-xs shrink-0">
+                                                        <div className="p-1 bg-background border border-border/50 rounded-md shadow-xs shrink-0">
                                                             <FileText className="w-3 h-3 text-primary" />
                                                         </div>
                                                         <div className="min-w-0">
@@ -513,29 +539,55 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                                         </div>
                                                     </div>
                                                     <div className="flex items-center gap-2 shrink-0">
-                                                        {groupSelectedCount > 0 && (
+                                                        {deleteSelectedCount > 0 && (
                                                             <span className="px-1.5 py-0.5 rounded-full bg-destructive/15 text-destructive text-[9px] font-bold tabular-nums">
-                                                                {groupSelectedCount} queued
+                                                                {deleteSelectedCount} to remove
                                                             </span>
                                                         )}
                                                         <span className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[9px] font-bold tabular-nums">
                                                             {group.paths.length} copies
                                                         </span>
                                                         <span className="text-[9px] font-mono text-muted-foreground/30 hidden lg:inline">
-                                                            {String(group.hash).slice(0, 8)}…
+                                                            {hashKey.slice(0, 8)}…
                                                         </span>
                                                     </div>
                                                 </div>
 
-                                                {/* File rows */}
+                                                {/* Keeper — which copy to keep */}
+                                                <div
+                                                    className="px-3 py-2 border-t border-border/40 bg-muted/20 flex flex-col sm:flex-row sm:items-center gap-2"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                >
+                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground shrink-0 flex items-center gap-1.5">
+                                                        <Bookmark className="w-3.5 h-3.5 text-primary" />
+                                                        Keep
+                                                    </span>
+                                                    <Select
+                                                        value={keeper}
+                                                        onValueChange={(v) => setGroupKeeper(hashKey, v, group.paths)}
+                                                    >
+                                                        <SelectTrigger className="h-8 text-[11px] flex-1 min-w-0 max-w-full border-border/60 bg-background">
+                                                            <SelectValue placeholder="Choose file to keep" />
+                                                        </SelectTrigger>
+                                                        <SelectContent className="max-w-[min(100vw-2rem,420px)]">
+                                                            {group.paths.map((path) => (
+                                                                <SelectItem key={path} value={path} title={path} className="text-[11px]">
+                                                                    <span className="truncate">{keeperOptionLabel(path, 72)}</span>
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+
                                                 {isExpanded && (
-                                                    <div className="divide-y divide-border/50">
-                                                        {group.paths.map(path => (
+                                                    <div className="divide-y divide-border/40 border-t border-border/30">
+                                                        {group.paths.map((path) => (
                                                             <div
                                                                 key={path}
                                                                 className={cn(
                                                                     "flex items-center gap-2.5 px-3 py-1.5 cursor-pointer group transition-all",
-                                                                    selectedPaths.has(path) ? "bg-destructive/5 hover:bg-destructive/10" : "hover:bg-accent/50",
+                                                                    path === keeper && "bg-primary/5",
+                                                                    selectedPaths.has(path) ? "bg-destructive/5 hover:bg-destructive/10" : "hover:bg-accent/40",
                                                                     previewTarget === path && "ring-1 ring-inset ring-primary/50 bg-primary/5"
                                                                 )}
                                                                 onClick={() => setPreviewTarget(path)}
@@ -546,14 +598,17 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                                                                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                                                     className="w-3.5 h-3.5 data-[state=checked]:bg-destructive data-[state=checked]:border-destructive shrink-0"
                                                                 />
-                                                                {/* Path: parent dir / filename */}
                                                                 <div className="flex-1 min-w-0">
                                                                     <div className="flex items-baseline gap-1 min-w-0">
                                                                         <span className="text-[10px] text-muted-foreground/60 shrink-0">…/{getParentDir(path)}/</span>
                                                                         <span className="text-[11px] font-medium truncate text-foreground group-hover:underline underline-offset-2">{getFileName(path)}</span>
                                                                     </div>
                                                                 </div>
-                                                                {/* Badge: User Space / System */}
+                                                                {path === keeper && (
+                                                                    <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-primary/15 text-primary text-[9px] font-bold">
+                                                                        Keep
+                                                                    </span>
+                                                                )}
                                                                 <span className={cn(
                                                                     "shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold hidden sm:inline",
                                                                     path.match(/[/\\]Users[/\\]/i) ? "bg-blue-500/10 text-blue-500" : "bg-muted text-muted-foreground"
@@ -599,9 +654,9 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
 
             {/* ── Preview Panel ─────────────────────────────────────────────── */}
             {previewTarget && (
-                <div className="w-[340px] flex flex-col animate-in slide-in-from-right duration-300 overflow-hidden bg-background border-l">
+                <div className="w-[340px] flex flex-col animate-in slide-in-from-right duration-300 overflow-hidden bg-card/30 border-l border-border/60">
                     {/* Header */}
-                    <div className="px-3 py-2.5 border-b bg-muted/30 flex items-center justify-between gap-2">
+                    <div className="px-3 py-2.5 border-b border-border/50 bg-muted/25 flex items-center justify-between gap-2">
                         <div className="min-w-0">
                             <div className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">Preview</div>
                             <div className="text-[12px] font-bold truncate text-foreground" title={getFileName(previewTarget)}>
@@ -642,7 +697,7 @@ export const DuplicateTab = ({ tabId: _tabId }: DuplicateTabProps) => {
                             </Button>
                             <Button variant="outline" size="sm" className="flex-1 h-7 text-[10px] gap-1"
                                 onClick={() => invoke("open_item", { path: previewTarget })}>
-                                <RefreshCcw className="w-3 h-3" /> Open
+                                <ExternalLink className="w-3 h-3" /> Open
                             </Button>
                         </div>
 

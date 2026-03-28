@@ -9,10 +9,8 @@ pub struct PreviewSettings {
     pub image: bool,
     pub video: bool,
     pub audio: bool,
-    pub text: bool,
     pub document: bool,
     pub archive: bool,
-    pub other: bool,
 }
 
 impl PreviewSettings {
@@ -20,35 +18,30 @@ impl PreviewSettings {
         let ext = ext.to_lowercase();
         let ext = ext.trim_start_matches('.');
 
-        if is_video_extension(ext) { return self.video; }
         if is_image_extension(ext) { return self.image; }
+        if is_video_extension(ext) { return self.video; }
         if is_audio_extension(ext) { return self.audio; }
-        if is_text_extension(ext) { return self.text; }
         if is_document_extension(ext) { return self.document; }
         if is_archive_extension(ext) { return self.archive; }
         
-        self.other
+        false
     }
+}
+
+fn is_image_extension(ext: &str) -> bool {
+    matches!(ext, "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg" | "tiff" | "ico" | "heic" | "heif" | "avif")
 }
 
 fn is_video_extension(ext: &str) -> bool {
     matches!(ext, "mp4" | "m4v" | "webm" | "mkv" | "mov" | "avi" | "wmv" | "asf" | "ts" | "mts" | "m2ts" | "m3u8" | "mpeg" | "mpg" | "mp2" | "mpe" | "mpv" | "flv" | "f4v" | "3gp" | "3g2" | "ogv" | "vob" | "rm" | "rmvb" | "divx" | "mk3d" | "qt" | "hevc" | "h265" | "h264")
 }
 
-fn is_image_extension(ext: &str) -> bool {
-    matches!(ext, "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "svg" | "avif" | "heic" | "heif" | "tiff" | "tif" | "ico" | "icns" | "raw" | "cr2" | "nef" | "arw" | "dng" | "orf" | "rw2" | "jfif" | "pjpeg" | "pjp")
-}
-
 fn is_audio_extension(ext: &str) -> bool {
     matches!(ext, "mp3" | "wav" | "ogg" | "oga" | "flac" | "m4a" | "aac" | "wma" | "aiff" | "aif" | "alac" | "opus" | "mid" | "midi" | "amr" | "ape" | "wv" | "caf")
 }
 
-fn is_text_extension(ext: &str) -> bool {
-    matches!(ext, "txt" | "md" | "markdown" | "js" | "mjs" | "cjs" | "ts" | "jsx" | "tsx" | "json" | "jsonc" | "yaml" | "yml" | "html" | "htm" | "css" | "scss" | "sass" | "xml" | "csv" | "tsv" | "sql" | "sh" | "bash" | "zsh" | "ps1" | "env" | "ini" | "conf" | "config" | "toml" | "py" | "rs" | "java" | "c" | "cpp" | "h" | "hpp" | "go" | "php" | "rb" | "swift" | "kt" | "dart" | "r" | "lua" | "pl")
-}
-
 fn is_document_extension(ext: &str) -> bool {
-    matches!(ext, "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "odt" | "ods" | "odp" | "pages" | "numbers" | "key" | "rtf")
+    matches!(ext, "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "odt" | "ods" | "odp" | "pages" | "numbers" | "key" | "rtf" | "txt")
 }
 
 fn is_archive_extension(ext: &str) -> bool {
@@ -68,10 +61,9 @@ pub struct ConfigSection {
     pub show_system_files: bool,
     pub blocked_extensions: Vec<String>,
     pub blocked_names: Vec<String>,
-    /// Number of worker threads for parallel operations (dedupe hashing).
-    /// None = use all logical CPUs.
+    /// When false (default), skip plain-text-like extensions in `find_duplicates` only.
     #[serde(default)]
-    pub thread_count: Option<usize>,
+    pub include_plain_text_in_duplicate_scan: bool, // default false for older settings.json
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -90,10 +82,27 @@ impl Default for PreviewSettings {
             image: true,
             video: true,
             audio: true,
-            text: true,
             document: true,
-            archive: false,
-            other: true,
+            archive: true,
+        }
+    }
+}
+
+impl Default for ConfigSection {
+    fn default() -> Self {
+        Self {
+            preview_enabled: PreviewSettings::default(),
+            show_hidden_files: true,
+            show_system_files: false,
+            blocked_extensions: vec![
+                "iso".to_string(), "tmp".to_string(), "map".to_string(), "log".to_string()
+            ],
+            blocked_names: vec![
+                "LICENSE".to_string(), "README".to_string(), "package-lock.json".to_string(),
+                "pnpm-lock.yaml".to_string(), "yarn.lock".to_string(), ".gitignore".to_string(),
+                ".DS_Store".to_string()
+            ],
+            include_plain_text_in_duplicate_scan: false,
         }
     }
 }
@@ -103,34 +112,6 @@ impl Default for ThemeSettings {
         Self {
             use_custom_color: false,
             custom_color: "#3b82f6".to_string(),
-        }
-    }
-}
-
-impl Default for ConfigSection {
-    fn default() -> Self {
-        Self {
-            preview_enabled: PreviewSettings::default(),
-            show_hidden_files: false,
-            show_system_files: false,
-            blocked_extensions: vec![
-                "js".to_string(), "ts".to_string(), "jsx".to_string(), "tsx".to_string(),
-                "py".to_string(), "rs".to_string(), "c".to_string(), "cpp".to_string(),
-                "h".to_string(), "hpp".to_string(), "java".to_string(), "go".to_string(),
-                "php".to_string(), "rb".to_string(), "swift".to_string(), "kt".to_string(),
-                "dart".to_string(), "r".to_string(), "lua".to_string(), "pl".to_string(),
-                "sh".to_string(), "bash".to_string(), "zsh".to_string(), "json".to_string(),
-                "yaml".to_string(), "yml".to_string(), "toml".to_string(), "md".to_string(),
-                "markdown".to_string(), "css".to_string(), "scss".to_string(), "less".to_string(),
-                "html".to_string(), "htm".to_string(), "sql".to_string(), "iso".to_string(),
-                "tmp".to_string(), "map".to_string()
-            ],
-            blocked_names: vec![
-                "LICENSE".to_string(), "README".to_string(), "package-lock.json".to_string(),
-                "pnpm-lock.yaml".to_string(), "yarn.lock".to_string(), ".gitignore".to_string(),
-                ".DS_Store".to_string()
-            ],
-            thread_count: None,
         }
     }
 }
@@ -189,7 +170,7 @@ pub fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
             show_system_files: old.show_system_files,
             blocked_extensions: old.blocked_extensions,
             blocked_names: Vec::new(),
-            thread_count: None,
+            include_plain_text_in_duplicate_scan: false,
         };
         new.dedupe = new.explorer.clone();
         new.content_search = new.explorer.clone();
